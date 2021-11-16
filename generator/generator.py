@@ -248,17 +248,11 @@ class Generator:
         # print(out, err)
         sshProcess.stdin.write(f"cd {self.proj_direc}/ml\n")
         sshProcess.stdin.write("ls\n")
-        # if dependency is None:
-        sshProcess.stdin.write(f"sbatch job.sh\n")
-        # else:
-        #     sshProcess.stdin.write(f"sbatch {dependency} job.sh\n")
+        if dependency is None:
+            sshProcess.stdin.write(f"sbatch job.sh\n")
+        else:
+            sshProcess.stdin.write(f"sbatch {dependency} job.sh\n")
         sshProcess.stdin.write("logout\n")
-        # result = sshProcess.stdout.readlines()
-        # if result == []:
-        #     error = sshProcess.stderr.readlines()
-        #     print(sys.stderr, "ERROR: %s" % error)
-        # else:
-        #     print(result)
         sshProcess.stdin.close()
 
         for line in sshProcess.stdout:
