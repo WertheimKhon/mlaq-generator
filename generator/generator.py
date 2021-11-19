@@ -4,39 +4,24 @@ from lammps_simulator import Simulator
 from lammps_simulator.computer import SlurmGPU, SlurmCPU
 from run_torch_model import create_dataloader, RunTorchCNN
 from simplexgrid import SimplexGrid, SeedGenerator
+from molecular_builder.geometry import ImageToSurfaceGeometry
+from molecular_builder.core import carve_geometry
 from pathlib import Path
 from data_analyzer import Dataset
 import os
 import shutil
 import torch
 import sys
+from cnn import Model
+import pandas as pd
+import pickle
 
 
 class Generator:
-    """The goal is for the class to generate a project which consists of data
-
-    1) Create a machine learning model and train it on a base dataset
-    2) Create new samples that the network has not seen
-    3) Use ML model to do predictions on the unseen data
-    4) Choose samples to realize (simulate and measure values)
-    5) Retrain the ML model
-    6) Repeat steps 2-4
-
-    Required functions:
-        a) creating samples
-        b) perform predictions
-            - use subprocess to wait for predictions to finish
-        c) choose samples by some user specified criteria
-        d)
-
-
-
-    sbatch job.sh
-    # starts e.g. 50 simulations with job id ranging from 1-50
-    sbatch --dependency=afterok:$(sbatch --parsable job.sh)
+    """
     """
 
-    def __init__(self, paths, criterion=None, params=None,
+    def __init__(self, paths, criterion=None, optimizer_args=None,
                  optimizer=None, epochs=2500):
 
         if not isinstance(criterion, str) and criterion is not None:
@@ -45,6 +30,7 @@ class Generator:
         if not isinstance(optimizer, str) and optimizer is not None:
             raise ValueError(
                 'optimizer must be of type str specifying which optimizer to use')
+
         self.job_ids = None
         self.generation = 0
         self.path_potential = Path(paths['potential'])
@@ -52,12 +38,14 @@ class Generator:
         self.path_cnn = Path(paths['cnn'])
         self.generation = 0
         self.criterion = criterion
-        self.params = params
+        self.optimizer_args = optimizer_args
         self.optimizer = optimizer
         self.epochs = epochs
 
-        # self.x = np.load(self.path_features)
-        # self.y = np.load(self.path_targets)
+        # Initiate a dataset
+        x = np.load(Path(paths['features']))
+        y = np.load(Path(paths['targets']))
+        self.dataset = Dataset(x, y)
 
         return
 
@@ -74,27 +62,51 @@ class Generator:
 
         # Create directories needed for generation 0
         try:
-            (path / 'gen0' / 'ml').mkdir(parents=True)
-            (path / 'gen0' / 'data').mkdir()
+            path.mkdir()
         except:
             i = 0
-            while True:
+            while i < 100:
                 try:
                     p = Path(str(path) + f'_{i}')
-                    (p / 'gen0' / 'ml').mkdir(parents=True)
-                    (p / 'gen0' / 'data').mkdir()
+                    p.mkdir()
                     path = p
                     break
                 except:
                     i += 1
+            if i == 100:
+                raise ValueError(f'{path} is not a valid path')
+
+        (path / 'gen0' / 'ml' / 'training').mkdir(parents=True)
+        (path / 'gen0' / 'ml' / 'predictions').mkdir()
+        (path / 'gen0' / 'data' / 'samples').mkdir(parents=True)
+        (path / 'gen0' / 'simulations' / 'weakest').mkdir(parents=True)
+        (path / 'gen0' / 'simulations' / 'strongest').mkdir()
 
         shutil.copy(path_features, path / 'gen0' / 'data' / 'features.npy')
         shutil.copy(path_targets, path / 'gen0' / 'data' / 'targets.npy')
 
         # Set current working directory. Updated as we increase the number of generations
-        self.proj_direc = path / 'gen0'
+        self.proj_direc = path
+        self.gen_direc = path / 'gen0'
 
         self.data_collect_job_id = None
+
+    # @staticmethod
+    # def gather_data():
+
+    def next_generation(self):
+        """Sets up for the next generation.
+        """
+        self.generation += 1
+        self.gen_direc = Path(str(self.proj_direc) + f'gen{self.generation}')
+
+        (self.gen_direc / 'ml' / 'training').mkdir(parents=True)
+        (self.gen_direc / 'ml' / 'predictions').mkdir()
+        (self.gen_direc / 'data' / 'samples').mkdir(parents=True)
+        (self.gen_direc / 'simulations' / 'weakest').mkdir(parents=True)
+        (self.gen_direc / 'simulations' / 'strongest').mkdir()
+
+        self.dataset.save_data(self.gen_direc / 'data')
 
     @staticmethod
     def generate_jobscript(arguments, exec_cmd, path):
@@ -110,16 +122,18 @@ class Generator:
         with open(path, 'w') as f:
             f.write('#!/bin/bash\n')
             for key, val in arguments.items():
-                f.write(f'#SBATCH --{key}={val}\n')
+                if val is None:
+                    f.write(f'#SBATCH --{key}')
+                else:
+                    f.write(f'#SBATCH --{key}={val}\n')
             f.write('\n\n')
-            f.write('echo $CUDA_VISIBLE_DEVICES\n')
             f.write(exec_cmd)
 
     @staticmethod
-    def slurm_gpu(N, **kwargs):
+    def slurm_gpu(N=1, **kwargs):
         """Generates arguments for Slurm GPU jobscript.
 
-        :param N: Number of GPUs
+        :param N: Number of GPUs. Defaults to 1.
         :type N: int
         """
         args = {'partition': 'normal',
@@ -134,7 +148,7 @@ class Generator:
         return args
 
     @staticmethod
-    def slurm_cpu(n_tasks, n_nodes, **kwargs):
+    def slurm_cpu(n_tasks, n_nodes, tasks_per_node, **kwargs):
         """Generates arguments for Slurm CPU jobscript.
 
         :param n_tasks: Number of tasks per CPU node
@@ -142,9 +156,10 @@ class Generator:
         :param n_nodes: Number of CPU nodes
         :param n_nodes: int
         """
-        args = {'partition': 'normal',
+        args = {'partition': 'cpu',
                 'ntasks': n_tasks,
                 'nodes': n_nodes,
+                'ntasks-per-node': tasks_per_node,
                 'output': 'slurm.out'}
 
         if kwargs:
@@ -154,7 +169,7 @@ class Generator:
         return args
 
     @staticmethod
-    def generate_trainer(path, optimizer, criterion, params, epochs):
+    def generate_trainer(path, optimizer, criterion, optimizer_args, epochs):
         """Generates a python script for training CNN
         """
 
@@ -162,11 +177,11 @@ class Generator:
             optimizer = 'torch.optim.Adam'
         if criterion is None:
             criterion = 'torch.nn.MSELoss()'
-        if params is None:
-            params = {'lr': 1e-4,
-                      'weight_decay': 0.01}
+        if optimizer_args is None:
+            optimizer_args = {'lr': 1e-4,
+                              'weight_decay': 0.01}
 
-        with open(path / 'ml' / 'run_cnn.py', 'w') as f:
+        with open(path / 'ml' / 'training' / 'run_cnn.py', 'w') as f:
             f.write('import torch \n')
             f.write('from run_torch_model import create_dataloader, RunTorchCNN \n')
             f.write('from cnn import Model \n')
@@ -181,14 +196,16 @@ class Generator:
             f.write(f'targets = targets[:, np.newaxis] \n\n')
             f.write(f'optimizer = "{optimizer}" \n')
             f.write(f'criterion = {criterion} \n')
-            f.write(f'params = {params} \n\n')
+            f.write(f'optimizer_args = {optimizer_args} \n\n')
             f.write('torch.backends.cudnn.benchmark = True \n\n')
             f.write('dataloader_train, dataloader_test=create_dataloader(features=features, targets=targets, batch_size=128, train_size=0.8, test_size=0.2, shuffle=True) \n\n')
             f.write(
-                f'train_cnn = RunTorchCNN(model, epochs={epochs}, optimizer=optimizer, optimizer_args=params, dataloaders=(dataloader_train, dataloader_test), criterion=criterion, verbose=False, seed=42) \n\n')
+                f'train_cnn = RunTorchCNN(model, epochs={epochs}, optimizer=optimizer, optimizer_args=optimizer_args, dataloaders=(dataloader_train, dataloader_test), criterion=criterion, verbose=False, seed=42) \n\n')
             f.write('train_cnn() \n\n')
-            f.write(f'train_cnn.save_model("{path / "ml" / "model.pt"}") \n')
-            f.write(f'train_cnn.save_running_metrics("{path / "ml"}") \n')
+            f.write(
+                f'train_cnn.save_model("{path / "ml" / "training" / "model.pt"}") \n')
+            f.write(
+                f'train_cnn.save_running_metrics("{path / "ml" / "training"}") \n')
 
     def train_cnn(self, file='run_cnn.py',
                   jobscript='job.sh',
@@ -198,21 +215,12 @@ class Generator:
         material structures. Queues a CNN to start when all MD simulations are
         completed.
 
-        To do:
-        subprocess which executes a python script that
-            1) creates dataloader
-            2) trains cnn
-            3) saves dictionary of findings
-            4) Wait argument when passing CNN training (stops the script from
-               executing _all_ the generations at once)
-
         TO-DO:
-            Figure out the correct argument for check_call
+            1) Set stdout and stderr subprocess to something else
         """
-        # Changing dir to ML
-        os.chdir(self.proj_direc / 'ml')
-
-        shutil.copy(self.path_cnn, Path.cwd() / 'cnn.py')
+        os.chdir(self.gen_direc / 'ml' / 'training')
+        shutil.copy(self.path_cnn, self.gen_direc /
+                    'ml' / 'training' / 'cnn.py')
 
         if method == 'slurm_gpu':
             args = self.slurm_gpu(N=1)
@@ -222,124 +230,444 @@ class Generator:
         args['job-name'] = 'cnn'
 
         # Generate script to run pytorch NN
-        self.generate_trainer(self.proj_direc, self.optimizer,
-                              self.criterion, self.params, self.epochs)
-        # Generate jobscript and store in .../ml
-        self.generate_jobscript(args,
-                                'python3 run_cnn.py',
-                                Path.cwd() / 'job.sh')
+        self.generate_trainer(self.gen_direc, self.optimizer,
+                              self.criterion, self.optimizer_args, self.epochs)
 
         if self.data_collect_job_id is not None:
-            dependency = f'--dependency=afterok:{self.data_collect_job_id}'
-        else:
-            dependency = None
+            args['dependency'] = f'afterok:{self.data_collect_job_id}'
+        args['wait'] = None
 
-        sshProcess = subprocess.Popen(['ssh', '-tt', 'bigfacet'],  # , ';', f"cd {self.proj_direc}/ml", ';',  f"sbatch job.sh", ';', "logout"],
-                                      stdin=subprocess.PIPE,
-                                      stdout=subprocess.PIPE,
-                                      stderr=subprocess.PIPE,
-                                      universal_newlines=True,
-                                      bufsize=0)  # as sshProcess:
+        # Generate jobscript and store in .../ml
+        self.generate_jobscript(arguments=args,
+                                exec_cmd=f'python3 run_cnn.py',
+                                path=self.gen_direc / 'ml' / 'training' / 'job.sh')
 
-        # out, err = sshProcess.communicate(f"""
-        #     cd {self.proj_direc}/ml
-        #     sbatch {dependency} --wait job.sh
-        # """)
-        # print(out, err)
-        sshProcess.stdin.write(f"cd {self.proj_direc}/ml\n")
-        sshProcess.stdin.write("ls\n")
-        if dependency is None:
-            sshProcess.stdin.write(f"sbatch job.sh\n")
-        else:
-            sshProcess.stdin.write(f"sbatch {dependency} job.sh\n")
-        sshProcess.stdin.write("logout\n")
-        sshProcess.stdin.close()
+        output = subprocess.check_output(["sbatch", "job.sh"],
+                                         stderr=subprocess.PIPE)
 
-        for line in sshProcess.stdout:
-            if line == "END\n":
-                break
-            print(line, end="")
+        print(f'Training complete for gen. {self.generation}')
+        os.chdir(self.proj_direc)
+
+        # for line in sshProcess.stdout:
+        #     if line == "END\n":
+        #         break
+        #     print(line, end="")
 
         return
 
-    @ staticmethod
-    def generate_sample_creator(path, parameters):
+    @staticmethod
+    def generate_samples_creator(path, parameters, initial_seed, N, iter):
         """Creates python file which executes the creation of new samples
         """
 
-        with open(path / 'data' / 'new_samples', 'w') as f:
+        with open(path / 'data' / 'samples' / f'new_samples{iter}.py', 'w') as f:
             f.write(
                 'from simplexgrid import CreateMultipleSimplexGrids, SeedGenerator\n')
-            f.write('import numpy as np\n')
+            f.write('import pickle\n')
+            f.write('import numpy as np\n\n')
+
             f.write('np.random.seed(42)\n\n')
-            f.write('seedgen = SeedGenerator(start=1, step=1)\n\n')
+
             f.write(f'octaves = {parameters["octaves"]}\n')
             f.write(f'scales = {parameters["scales"]}\n')
             f.write(f'thresholds = {parameters["thresholds"]}\n')
             f.write(f'bases = {parameters["bases"]}\n')
-            f.write(f'')
+            f.write(f'l1 = {parameters["l1"]}\n')
+            f.write(f'l2 = {parameters["l2"]}\n')
+            f.write(f'n1 = {parameters["n1"]}\n')
+            f.write(f'n2 = {parameters["n2"]}\n')
 
-    # def create_new_samples(self, parameters):
-    #     """Create new samples to perform predictions on.
-    #
-    #     ssh to egil
-    #     sbatch cpu job
-    #         - pass **parameters to simplexgrid
-    #         - creates new samples
-    #     """
-    #
-    # def prediction_new_samples(self):
-    #     """Performs predictions on new samples. Runs on GPU
-    #     """
-    #
-    #     return
-    #
-    # def choose_samples(self):
-    #     """Choose 100 strongest and 100 weakest.
-    #     """
-    #
-    #     return
-    #
-    # def execute_lammps_files(self, lmp_args, slurm_args, var, N):
-    #     self.job_ids = np.zeros(N)
-    #
-    #     for i in range(N):
-    #         slurm_args['job_name'] = slurm_args['job_name'] + f'{i}'
-    #         var['datafile'] = f'{i}.data'
-    #
-    #         computer = SlurmGPU(lmp_exec='lmp',
-    #                             slurm_args=slurm_args,
-    #                             lmp_args=lmp_args,
-    #                             job_script='job.sh')
-    #         sim = Simulator(directory=self.path_data / 'run' / f'{i}')
-    #         sim.copy_to_wd(self.path_data / f'{i}.data', self.path_potential)
-    #         sim.set_input_script(self.path_lmp, **var)
-    #         self.job_ids[i] = sim.run(computer=computer)
-    #
-    #     return
-    #
-    # @staticmethod
-    # def create_job_collect_data(path):
-    #
-    # def gather_samples(self, data_paths, output_path):
-    #     """Gathers samples from different data paths.
-    #     """
-    #     path_new_features = data_paths['new_features']
-    #     path_new_targets = data_paths['new_targets']
-    #
-    #     jobid_string = ':'.join(map(str, self.job_ids))
-    #     dependency = f'--dependency=afterok:{jobid_string}'
-    #
-    #     # Execute program which opens the existing features/targets and appends
-    #     # the new features/targets, and then creates dataloaders to be used
-    #     # during training
-    #     file_collect_data = 'job_collect_data.sh'
-    #     var = f'{data_path}'
-    #
-    #     # str(subprocess.check_output(["sbatch", self.jobscript], stderr=stderr))
-    #     output = str(subprocess.check_output(
-    #         ['sbatch', f'{dependency}', f'{file_collect_data}', f'{var}'],
-    #         stderr=subprocess.PIPE))
-    #     self.gather_samples_job_id = str(re.findall('([0-9]+)', output)[0])
-    #
-    # def create_direcs(self, gen):
+            f.write(f'N = {N}\n\n')
+
+            f.write(
+                f'seedgen = SeedGenerator(start={initial_seed}, step=1)\n\n')
+
+            f.write('def criterion(x):\n')
+            f.write('   x.sum() / (x.shape[0] * x.shape[1])\n')
+            f.write('   N = x.shape[0]\n')
+            f.write('   n_12 = x.shape[1] * x.shape[2]\n')
+            f.write('   porosity = x.sum(axis=(1, 2)) / n_12\n')
+            f.write('   inds = np.logical_and(porosity > 0.09, porosity < 0.51)\n')
+            f.write('   if inds.sum() == 0:\n')
+            f.write('       return np.array([])\n')
+            f.write('   else:\n')
+            f.write('       inds = np.arange(N)[inds]\n')
+            f.write('   return inds\n\n')
+
+            f.write(
+                'simpgrid = CreateMultipleSimplexGrids(scales, thresholds, bases, octaves, l1, l2, n1, n2, N, seedgen, criterion=criterion)\n')
+            f.write('dictionary = simpgrid()\n\n')
+            f.write(
+                f'with open("{path}/data/samples/samples_{iter}", "wb") as f:\n')
+            f.write(
+                f'  pickle.dump(dictionary, f, protocol=pickle.HIGHEST_PROTOCOL)\n')
+
+        return
+
+    def create_new_samples(self, initial_seed, parameters, n_tasks, n_nodes, N,
+                           tasks_per_node=16, method='slurm_cpu',
+                           jobname='new_samples', **kwargs):
+        """Create new samples to perform predictions on.
+
+        ssh to egil
+        sbatch cpu job
+            - pass **parameters to simplexgrid
+            - creates new samples
+
+        TO-DO:
+            - Rewrite while flag part of code to make it as vectorized as
+              possible. Can use int division to remove some iterations of the
+              for loop, but what more?
+        """
+        # Split tasks evenly among nodes
+        tmp = N // n_tasks
+        # Creating number of samples for each node
+        N_per_node = tmp * np.ones(n_tasks, dtype=int)
+        # If number of tasks does not split evenly among nodes
+        if N - tmp != 0:
+            difference = N - int(tmp * n_tasks)
+            flag = True
+            while flag:
+                # Manually add 1 to each element in N_per_node until difference = 0
+                for i in range(n_tasks):
+                    N_per_node[i] += 1
+                    difference -= 1
+                    if difference == 0:
+                        flag = False
+                        break
+
+        init_seeds = initial_seed + (N_per_node * np.arange(n_tasks))
+
+        for i in range(n_tasks):
+            self.generate_samples_creator(
+                self.gen_direc, parameters, init_seeds[i], N_per_node[i], i)
+
+        try:
+            args = eval('self.' + method)(n_tasks,
+                                          n_nodes, tasks_per_node, **kwargs)
+        except:
+            raise NotImplementedError(
+                f'{method} is not a valid argument for method')
+
+        args['job-name'] = jobname
+        args['wait'] = None
+
+        command = f"""for i in $(seq 0 {n_tasks - 1}); do
+    srun --exclusive --ntasks=1 --nodes=1 python3 new_samples$i.py &
+done
+wait
+        """
+
+        self.generate_jobscript(
+            args, command, self.gen_direc / 'data' / 'samples' / 'job.sh')
+
+        sshProcess = subprocess.Popen(['ssh', '-tt', 'egil'],
+                                      stdin=subprocess.PIPE,
+                                      stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL,
+                                      universal_newlines=True,
+                                      bufsize=0)
+
+        sshProcess.stdin.write(f"cd {self.gen_direc}/data/samples\n")
+        sshProcess.stdin.write(f"sbatch job.sh\n")
+        sshProcess.stdin.write("logout\n")
+        sshProcess.wait()
+        sshProcess.stdin.close()
+        print(f'Created samples complete for gen. {self.generation}')
+        # for line in sshProcess.stdout:
+        #     if line == "END\n":
+        #         break
+        #     print(line, end="")
+
+    @ staticmethod
+    def gather_new_samples(path):
+        """Collects samples created by multiple instances of SimplexGrid.
+
+        """
+        files = path.glob('samples_*')
+        dicts = []
+        for file in files:
+            with open(file, 'rb') as f:
+                d = pickle.load(f)
+            dicts.append(d)
+
+        dictionary = dicts[0]
+        dicts.remove(dicts[0])
+
+        for d in dicts:
+            for key, val in d.items():
+                dictionary[key].extend(d[key])
+        with open(path / 'all_samples', 'wb') as f:
+            pickle.dump(dictionary, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    @staticmethod
+    def create_preds_new_samples(ml_path, samples_path, epochs, optimizer,
+                                 criterion, optimizer_args):
+        """Creates a python script that performs
+        """
+
+        if optimizer is None:
+            optimizer = 'torch.optim.Adam'
+        if criterion is None:
+            criterion = 'torch.nn.MSELoss()'
+        if optimizer_args is None:
+            optimizer_args = {'lr': 1e-4,
+                              'weight_decay': 0.01}
+
+        with open(ml_path / 'predictions' / 'preds.py', 'w') as f:
+            f.write('from run_torch_model import RunTorchCNN\n')
+            f.write('import torch\n')
+            f.write('import pickle\n')
+            f.write('from cnn import Model\n')
+            f.write('import numpy as np\n\n')
+
+            f.write(
+                f'with open("{samples_path}/all_samples", "rb") as f:\n')
+            f.write('   features = np.array(pickle.load(f)["grid"])\n')
+            f.write('tensor = torch.Tensor(features[:, np.newaxis, :, :])\n\n')
+
+            f.write('model = Model()\n')
+            f.write(
+                f'run_model = RunTorchCNN(model=model, epochs={epochs}, optimizer="{optimizer}", optimizer_args={optimizer_args}, dataloaders=None, criterion={criterion})\n')
+            f.write(f'run_model.load_model("{ml_path}/training/model.pt")\n')
+            f.write('predictions = run_model.predict(tensor)\n')
+            f.write('predictions = predictions.detach().cpu().numpy()\n')
+            f.write(
+                f'np.save("{ml_path}/predictions/predictions", predictions)\n')
+
+    def prediction_new_samples(self):
+        """Performs predictions on new samples. Runs on GPU
+        """
+        os.chdir(self.gen_direc / 'ml' / 'predictions')
+
+        shutil.copy(self.path_cnn, self.gen_direc / 'ml' / 'predictions')
+
+        self.gather_new_samples(self.gen_direc / 'data' / 'samples')
+
+        self.create_preds_new_samples(self.gen_direc / 'ml',
+                                      self.gen_direc / 'data' / 'samples',
+                                      epochs=self.epochs,
+                                      optimizer=self.optimizer,
+                                      criterion=self.criterion,
+                                      optimizer_args=self.optimizer_args)
+
+        args = self.slurm_gpu()
+        args['wait'] = None
+        self.generate_jobscript(args,
+                                'python preds.py',
+                                self.gen_direc / 'ml' / 'predictions' / 'job.sh',)
+
+        output = subprocess.check_output(
+            ["sbatch", "job.sh"],
+            stderr=subprocess.PIPE)
+
+        print(f'Predictions for samples complete for gen. {self.generation}')
+
+        with open(self.gen_direc / 'data' / 'samples' / 'all_samples', 'rb') as f:
+            self.features_new = np.array(pickle.load(f)["grid"])
+
+        self.predictions = np.load(
+            self.gen_direc / 'ml' / 'predictions' / 'predictions.npy')[:, 0]
+
+        os.chdir(self.proj_direc)
+
+    @staticmethod
+    def check_porosity_samples(image, N_atoms, atoms, normal=(0, 1, 0)):
+        """Check the actual porosity for the chosen samples.
+        """
+        atoms_copy = atoms.copy()
+        geometry = ImageToSurfaceGeometry(normal=normal, image=image)
+        num_carved = carve_geometry(atoms_copy, geometry, side="out")
+        porosity = num_carved / N_atoms
+
+        return porosity, atoms_copy
+
+    def choose_samples(self, atoms_cutspace, atoms, N=100):  # , criterions):
+        """Choose samples by the N strongest and N weakest. The porosity
+        is checked for each sample, making sure the sample has porosity
+        between 0.1 and 0.5. The sample is then stored in simulations folder.
+
+        :param atoms_cutspace, atoms: ASE object
+        :type atoms_cutspace, atoms: atoms object
+        :param N: Number of samples to proceed with. Defaults to 100.
+        :type N: int
+        """
+        # if isinstance(criterions, list):
+        #     inds = []
+        #     for criterion in criterions:
+        #         tmp = criterion(self.predictions)
+        #         inds.append(tmp)
+        #
+        # else:
+        #     inds = criterion(self.predictions)
+
+        inds_sorted = np.argsort(self.predictions)
+        inds_strongest = []
+        inds_weakest = []
+
+        N_atoms = len(atoms_cutspace)
+
+        i = 0
+        idx = 0
+        while len(inds_weakest) < N:
+            ind = inds_sorted[i]
+            p, atoms_carved = self.check_porosity_samples(
+                self.features_new[ind], N_atoms, atoms_cutspace)
+            if p < 0.5 and p > 0.1:
+                inds_weakest.append(ind)
+                new_atoms = atoms_carved + atoms
+                new_atoms.write(self.gen_direc / 'simulations' / 'weakest' /
+                                f'weakest_{idx}.data', format='lammps-data')
+                idx += 1
+            i += 1
+            if ind == inds_sorted[-1]:
+                print('No weakest found')
+                break
+
+        i = -1
+        idx = 0
+        while len(inds_strongest) < N:
+            ind = inds_sorted[i]
+            p, atoms_carved = self.check_porosity_samples(
+                self.features_new[ind], N_atoms, atoms_cutspace)
+
+            if p < 0.5 and p > 0.1:
+                inds_strongest.append(ind)
+                new_atoms = atoms_carved + atoms
+                new_atoms.write(self.gen_direc / 'simulations' / 'strongest' /
+                                f'strongest_{idx}.data', format='lammps-data')
+                idx += 1
+            i -= 1
+            if ind == inds_sorted[0]:
+                print('No strongest found')
+                break
+
+        assert not np.any(np.in1d(inds_strongest, inds_weakest)), \
+            "Same geometry present in both strongest and weakest"
+
+        self.features_new_weakest = self.features_new[inds_weakest]
+        self.features_new_strongest = self.features_new[inds_strongest]
+
+        self.dataset.extend_data(features=np.concatenate(
+            (self.features_new_weakest, self.features_new_strongest), axis=0))
+
+        print(f'Choosing new samples complete for gen {self.generation}')
+
+        return
+
+    def execute_lammps_files(self, lmp_args, slurm_args, var, N=100):
+        job_ids_w = np.zeros(N, dtype=int)
+
+        for i in range(N):
+            slurm_args['job-name'] = f'w{i}'
+            var['datafile'] = f'weakest_{i}.data'
+
+            computer = SlurmGPU(lmp_exec='lmp',
+                                slurm_args=slurm_args,
+                                lmp_args=lmp_args,
+                                jobscript='job.sh')
+            sim = Simulator(directory=str(self.gen_direc /
+                            'simulations' / 'weakest' / 'run' / f'{i}'))
+            sim.copy_to_wd(str(self.gen_direc / 'simulations' / 'weakest' /
+                           f'weakest_{i}.data'), str(self.path_potential))
+            sim.set_input_script(str(self.path_lmp), **var)
+            job_ids_w[i] = sim.run(computer=computer)
+
+        jobid_string = ':'.join(map(str, job_ids_w))
+
+        job_ids_s = np.zeros(N, dtype=int)
+        for i in range(N):
+            slurm_args['job-name'] = f's{i}'
+            slurm_args['dependency'] = f'afterok:{jobid_string}'
+            var['datafile'] = f'strongest_{i}.data'
+
+            computer = SlurmGPU(lmp_exec='lmp',
+                                slurm_args=slurm_args,
+                                lmp_args=lmp_args,
+                                jobscript='job.sh')
+            sim = Simulator(directory=str(self.gen_direc /
+                            'simulations' / 'strongest' / 'run' / f'{i}'))
+            sim.copy_to_wd(str(self.gen_direc / 'simulations' / 'strongest' /
+                           f'strongest_{i}.data'), str(self.path_potential))
+            sim.set_input_script(str(self.path_lmp), **var)
+            job_ids_s[i] = sim.run(computer=computer)
+
+            self.job_ids = np.concatenate((job_ids_w, job_ids_s))
+
+        print(f'LAMMPS simulations are complete for gen {self.generation}')
+
+        return
+
+    @staticmethod
+    def create_collect_data(path, subpath='weakest',
+                            low=int(np.ceil(30 / 0.0005) / 10)):
+        """Path has to be path to generation folder
+        """
+        with open(path / 'simulations' / 'collect_data.py', 'w') as f:
+            f.write('import numpy as np\n')
+            f.write('from lammps_logfile_reader import readLog\n')
+            f.write('from pathlib import Path')
+            f.write('from data_analyzer import dataset\n\n')
+
+            f.write(f'low = {low}\n')
+            f.write('yield_stress = np.zeros(200)\n\n')
+
+            f.write(f'for i in range(100):\n')
+            f.write(
+                f'  logfile = Path("{path}") / "simulations" / "{subpath}" / "run" / "sim" + str(i) / "log.lammps"\n')
+            f.write(f'  logdict = readLog(logfile).read()\n')
+            f.write(
+                f'  pyy = -np.array(logdict.get("Pyy"), dtype=float)[low:] / 1e4\n')
+            f.write(f'  dset = Dataset(np.zeros(pyy.shape), pyy)\n')
+            f.write(f'  dset.prep_data_mlaq(window=1001)\n')
+            f.write(f'  yield_stress[i] = dset.get_ymax()\n\n')
+
+            f.write(
+                f'np.save(Path("{path}") / "simulations" / "{subpath}" / "yield_stress", yield_stress)')
+
+    def get_measured_strenght(self):
+        """Collects the strength measured by MD simulations of the 100 strongest
+        and 100 weakest predicted samples.
+        """
+
+        # Creating python scripts to generate yield stress files
+        self.create_collect_data(self.gen_direc, subpath='weakest')
+        self.create_collect_data(self.gen_direc, subpath='strongest')
+
+        args = self.slurm_gpu()
+
+        # Creating a dependency for all the simulations, such that we do not try
+        # to collect yield stress before it has been measured
+        jobid_string = ':'.join(map(str, self.job_ids))
+        args['dependency'] = f'afterok:{jobid_string}'
+        args['wait'] = None
+        args['job-name'] = 'collect'
+
+        # Creating job scripts for creating yield stress files
+        self.generate_jobscript(arguments=args,
+                                exec_cmd='python collect_data.py',
+                                path=self.gen_direc / 'simulations' / 'weakest' / 'job.sh')
+        self.generate_jobscript(arguments=args,
+                                exec_cmd='python collect_data.py',
+                                path=self.gen_direc / 'simulations' / 'strongest' / 'job.sh')
+        os.chdir(self.gen_direc / 'simulations' / 'weakest')
+        subprocess.Popen(
+            ['sbatch', 'job.sh']).wait()
+        tmp1 = np.load('yield_stress.npy')
+
+        os.chdir(self.gen_direc / 'simulations' / 'strongest')
+        subprocess.Popen(
+            ['sbatch', 'job.sh']).wait()
+        tmp2 = np.load('yield_stress.npy')
+
+        print(f'Collected yield complete for gen. {self.generation}')
+
+        # self.job_id = int(re.findall("([0-9]+)", output)[0])
+
+        # Load new yield stresses and concatenate to single array, thereafter
+        # add to dataset object
+
+        self.targets_new = np.concatenate((tmp1, tmp2), axis=0)
+        self.dataset.extend(targets=self.targets_new)
+
+        os.chdir(self.proj_direc)
