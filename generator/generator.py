@@ -81,10 +81,6 @@ class Generator:
 
         :param path: Path to store project
         :type path: pathlib.PosixPath or str
-        :param path_features: Path of features
-        :type path_features: pathlib.PosixPath or str
-        :param path_targets: Path of targets
-        :type path_targets: pathlib.PosixPath or str
         """
         assert self.generation == 0, \
             'Cannot initiate project if it has already started'
