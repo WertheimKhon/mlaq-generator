@@ -91,10 +91,10 @@ class Generator:
         try:
             path.mkdir()
         except:
-            i = 0
-            while i < 100:
+            i = 1
+            while i < 101:
                 try:
-                    p = Path(str(path) + f'_{i}')
+                    p = Path(str(path) + f'{i}')
                     p.mkdir()
                     path = p
                     break
@@ -124,7 +124,7 @@ class Generator:
         """Sets up for the next generation.
         """
         self.generation += 1
-        self.gen_direc = Path(str(self.proj_direc) + f'gen{self.generation}')
+        self.gen_direc = self.proj_direc / f'gen{self.generation}'
 
         (self.gen_direc / 'ml' / 'training').mkdir(parents=True)
         (self.gen_direc / 'ml' / 'predictions').mkdir()
@@ -132,11 +132,12 @@ class Generator:
         (self.gen_direc / 'simulations' / 'weakest').mkdir(parents=True)
         (self.gen_direc / 'simulations' / 'strongest').mkdir()
 
-        self.dataset.save_data(self.gen_direc / 'data')
+        self.dataset.save_data(self.gen_direc / 'data', y='y')
 
-        print(f'Next generation --- {self.generation}')
+        print(f'===============================================================')
+        print(f'Next generation: {self.generation}')
 
-    @staticmethod
+    @ staticmethod
     def generate_jobscript(arguments, exec_cmd, path):
         """Generates a jobscript with givens arguments.
 
@@ -157,7 +158,7 @@ class Generator:
             f.write('\n\n')
             f.write(exec_cmd)
 
-    @staticmethod
+    @ staticmethod
     def slurm_gpu(N=1, **kwargs):
         """Generates arguments for Slurm GPU jobscript.
 
@@ -175,7 +176,7 @@ class Generator:
 
         return args
 
-    @staticmethod
+    @ staticmethod
     def slurm_cpu(n_tasks, n_nodes, tasks_per_node, **kwargs):
         """Generates arguments for Slurm CPU jobscript.
 
@@ -196,7 +197,7 @@ class Generator:
 
         return args
 
-    @staticmethod
+    @ staticmethod
     def generate_trainer(path, optimizer, criterion, optimizer_args, epochs):
         """Generates a python script for training CNN
 
@@ -296,7 +297,7 @@ class Generator:
 
         return
 
-    @staticmethod
+    @ staticmethod
     def generate_samples_creator(path, parameters, initial_seed, N, iter):
         """Creates python file which executes the creation of new samples
 
@@ -404,7 +405,7 @@ class Generator:
         N_params = eval(parameters['octaves']).shape[0] * eval(
             parameters['scales']).shape[0] * eval(parameters['thresholds']).shape[0]
 
-        init_seeds = [0]
+        init_seeds = [initial_seed]
         for i in range(1, n_tasks):
             init_seeds.append(
                 init_seeds[i - 1] + N_params * N_per_node[i - 1])
@@ -711,23 +712,30 @@ wait
 
             self.job_ids = np.concatenate((job_ids_w, job_ids_s))
 
-        print(f'Gen {self.generation}: LAMMPS simulations in queue')
+        print(f'Gen. {self.generation}: LAMMPS simulations in queue')
 
         return
 
     @staticmethod
-    def create_collect_data(path, subpath='weakest',
-                            low=int(np.ceil(30 / 0.0005) / 10)):
+    def create_collect_data(path,
+                            subpath='weakest',
+                            N=100,
+                            low=int(np.ceil(30 / 0.0005) / 10),
+                            window_length=1001):
         """Path has to be path to generation folder
 
         :param path: Project path.
         :type path: str
         :param subpath: "Path" of subsamples. Defaults to weakest.
         :type subpath: str
+        :param N: Number of simulations. Defaults to 100.
+        :type N: int
         :param low: Initial index of lammps logfile. Typically the index after
                     equilibriation. Defaults to int(np.ceil(30 / 0.0005) / 10)),
                     30 ps runtime, dt 0.0005 and a print interval of 10.
         :type low: int
+        :param window_length: Window length for savgol_filter. Defaults to 1001.
+        :type window: int
         """
         with open(path / 'simulations' / subpath / 'collect_data.py', 'w') as f:
             f.write('import numpy as np\n')
@@ -736,9 +744,9 @@ wait
             f.write('from data_analyzer import Dataset\n\n')
 
             f.write(f'low = {low}\n')
-            f.write('yield_stress = np.zeros(200)\n\n')
+            f.write(f'yield_stress = np.zeros({int(N)})\n\n')
 
-            f.write(f'for i in range(100):\n')
+            f.write(f'for i in range({N}):\n')
             f.write(f'  p = "{path}/simulations/{subpath}/run"\n')
             f.write('  logfile = f"{p}/{i}/log.lammps"\n')
             # f.write(
@@ -747,20 +755,31 @@ wait
             f.write(
                 f'  pyy = -np.array(logdict.get("Pyy"), dtype=float)[low:] / 1e4\n')
             f.write(f'  dset = Dataset(np.zeros(pyy.shape), pyy)\n')
-            f.write(f'  dset.prep_data_mlaq(window=101)\n')
+            f.write(f'  dset.prep_data_mlaq(window_length={window_length})\n')
             f.write(f'  yield_stress[i] = dset.get_ymax()\n\n')
 
             f.write(
                 f'np.save(Path("{path}") / "simulations" / "{subpath}" / "yield_stress", yield_stress)')
 
-    def get_measured_strength(self):
+    def get_measured_strength(self, N=100, window_length=1001):
         """Collects the strength measured by MD simulations of the 100 strongest
         and 100 weakest predicted samples.
+
+        :param N: Number of simulations. Defaults to 100.
+        :type N: int
+        :param window_length: Window length for savgol_filter smoothing.
+        :type window_length: int
         """
 
         # Creating python scripts to generate yield stress files
-        self.create_collect_data(self.gen_direc, subpath='weakest')
-        self.create_collect_data(self.gen_direc, subpath='strongest')
+        self.create_collect_data(self.gen_direc,
+                                 subpath='weakest',
+                                 N=N,
+                                 window_length=window_length)
+        self.create_collect_data(self.gen_direc,
+                                 subpath='strongest',
+                                 N=N,
+                                 window_length=window_length)
 
         args = self.slurm_gpu()
 
@@ -794,6 +813,6 @@ wait
         # add to dataset object
 
         self.targets_new = np.concatenate((tmp1, tmp2), axis=0)
-        self.dataset.extend(targets=self.targets_new)
+        self.dataset.extend_data(targets=self.targets_new)
 
         os.chdir(self.proj_direc)
