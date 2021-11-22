@@ -648,7 +648,7 @@ wait
         self.dataset.extend_data(features=np.concatenate(
             (self.features_new_weakest, self.features_new_strongest), axis=0))
 
-        print(f'Gen {self.generation}: samples chosen')
+        print(f'Gen. {self.generation}: samples chosen')
 
         return
 
@@ -732,6 +732,8 @@ wait
             f.write(f'for i in range(100):\n')
             f.write(f'  p = "{path}/simulations/{subpath}/run"')
             f.write('   logfile = f"{p}/sim{i}/log.lammps"\n')
+            # f.write(
+            #     f'  logfile = f"{path}/simulations/{subpath}/run/sim" + str(i) + "/log.lammps"\n')
             f.write(f'  logdict = readLog(logfile).read()\n')
             f.write(
                 f'  pyy = -np.array(logdict.get("Pyy"), dtype=float)[low:] / 1e4\n')
