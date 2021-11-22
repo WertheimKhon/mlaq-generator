@@ -728,7 +728,7 @@ wait
             f.write('import numpy as np\n')
             f.write('from lammps_logfile_reader import readLog\n')
             f.write('from pathlib import Path\n')
-            f.write('from data_analyzer import dataset\n\n')
+            f.write('from data_analyzer import Dataset\n\n')
 
             f.write(f'low = {low}\n')
             f.write('yield_stress = np.zeros(200)\n\n')
@@ -741,7 +741,7 @@ wait
             f.write(f'  logdict = readLog(logfile).read()\n')
             f.write(
                 f'  pyy = -np.array(logdict.get("Pyy"), dtype=float)[low:] / 1e4\n')
-            f.write(f'  dset = dataset(np.zeros(pyy.shape), pyy)\n')
+            f.write(f'  dset = Dataset(np.zeros(pyy.shape), pyy)\n')
             f.write(f'  dset.prep_data_mlaq(window=1001)\n')
             f.write(f'  yield_stress[i] = dset.get_ymax()\n\n')
 
