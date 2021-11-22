@@ -134,6 +134,8 @@ class Generator:
 
         self.dataset.save_data(self.gen_direc / 'data')
 
+        print(f'Next generation --- {self.generation}')
+
     @staticmethod
     def generate_jobscript(arguments, exec_cmd, path):
         """Generates a jobscript with givens arguments.
@@ -261,9 +263,6 @@ class Generator:
                        meaning the training will be done on a GPU using slurm
                        queue.
         :type method: str
-
-        TO-DO:
-            1) Set stdout and stderr subprocess to something else
         """
         os.chdir(self.gen_direc / 'ml' / 'training')
         shutil.copy(self.path_cnn, self.gen_direc /
@@ -292,7 +291,7 @@ class Generator:
         output = subprocess.check_output(['sbatch', 'job.sh'],
                                          stderr=subprocess.PIPE)
 
-        print(f'Training complete for gen. {self.generation}')
+        print(f'Gen. {self.generation}: training complete')
         os.chdir(self.proj_direc)
 
         return
@@ -439,7 +438,7 @@ wait
         sshProcess.stdin.write("logout\n")
         sshProcess.wait()
         sshProcess.stdin.close()
-        print(f'Created samples complete for gen. {self.generation}')
+        print(f'Gen. {self.generation}: created samples')
         # for line in sshProcess.stdout:
         #     if line == "END\n":
         #         break
@@ -545,7 +544,7 @@ wait
             ["sbatch", "job.sh"],
             stderr=subprocess.PIPE)
 
-        print(f'Predictions for samples complete for gen. {self.generation}')
+        print(f'Gen. {self.generation}: predictions on samples complete')
 
         with open(self.gen_direc / 'data' / 'samples' / 'all_samples', 'rb') as f:
             self.features_new = np.array(pickle.load(f)["grid"])
@@ -650,7 +649,7 @@ wait
         self.dataset.extend_data(features=np.concatenate(
             (self.features_new_weakest, self.features_new_strongest), axis=0))
 
-        print(f'Choosing new samples complete for gen {self.generation}')
+        print(f'Gen {self.generation}: samples chosen')
 
         return
 
@@ -704,7 +703,7 @@ wait
 
             self.job_ids = np.concatenate((job_ids_w, job_ids_s))
 
-        print(f'LAMMPS simulations are complete for gen {self.generation}')
+        print(f'Gen {self.generation}: LAMMPS simulations complete')
 
         return
 
@@ -779,9 +778,7 @@ wait
             ['sbatch', 'job.sh']).wait()
         tmp2 = np.load('yield_stress.npy')
 
-        print(f'Collected yield complete for gen. {self.generation}')
-
-        # self.job_id = int(re.findall("([0-9]+)", output)[0])
+        print(f'Gen. {self.generation}: yield for new samples stored to files')
 
         # Load new yield stresses and concatenate to single array, thereafter
         # add to dataset object
