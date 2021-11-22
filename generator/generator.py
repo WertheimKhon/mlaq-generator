@@ -702,7 +702,7 @@ wait
 
             self.job_ids = np.concatenate((job_ids_w, job_ids_s))
 
-        print(f'Gen {self.generation}: LAMMPS simulations complete')
+        print(f'Gen {self.generation}: LAMMPS simulations in queue')
 
         return
 
@@ -720,7 +720,7 @@ wait
                     30 ps runtime, dt 0.0005 and a print interval of 10.
         :type low: int
         """
-        with open(path / 'simulations' / 'collect_data.py', 'w') as f:
+        with open(path / 'simulations' / subpath / 'collect_data.py', 'w') as f:
             f.write('import numpy as np\n')
             f.write('from lammps_logfile_reader import readLog\n')
             f.write('from pathlib import Path')
