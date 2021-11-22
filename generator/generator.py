@@ -730,7 +730,7 @@ wait
             f.write('yield_stress = np.zeros(200)\n\n')
 
             f.write(f'for i in range(100):\n')
-            f.write(f'  p = "{path}/simulations/{subpath}/run"')
+            f.write(f'  p = "{path}/simulations/{subpath}/run"\n')
             f.write('   logfile = f"{p}/sim{i}/log.lammps"\n')
             # f.write(
             #     f'  logfile = f"{path}/simulations/{subpath}/run/sim" + str(i) + "/log.lammps"\n')
