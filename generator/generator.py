@@ -547,7 +547,7 @@ wait
         args = self.slurm_gpu()
         args['wait'] = None
         self.generate_jobscript(args,
-                                'python preds.py',
+                                'python3 preds.py',
                                 self.gen_direc / 'ml' / 'predictions' / 'job.sh',)
 
         output = subprocess.check_output(['sbatch', 'job.sh'],
@@ -792,10 +792,10 @@ wait
 
         # Creating job scripts for creating yield stress files
         self.generate_jobscript(arguments=args,
-                                exec_cmd='python collect_data.py',
+                                exec_cmd='python3 collect_data.py',
                                 path=self.gen_direc / 'simulations' / 'weakest' / 'job.sh')
         self.generate_jobscript(arguments=args,
-                                exec_cmd='python collect_data.py',
+                                exec_cmd='python3 collect_data.py',
                                 path=self.gen_direc / 'simulations' / 'strongest' / 'job.sh')
         os.chdir(self.gen_direc / 'simulations' / 'weakest')
         output = subprocess.check_output(['sbatch', 'job.sh'],
