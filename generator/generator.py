@@ -407,7 +407,7 @@ class Generator:
         init_seeds = [0]
         for i in range(1, n_tasks):
             init_seeds.append(
-                init_seeds[i - 1] + tot_tasks * N_per_node[i - 1])
+                init_seeds[i - 1] + N_params * N_per_node[i - 1])
         init_seeds = np.array(init_seeds)
         # init_seeds = initial_seed + \
         #     (N_per_node * N_params * np.arange(n_tasks))
