@@ -401,7 +401,10 @@ class Generator:
                         flag = False
                         break
 
-        init_seeds = initial_seed + (N_per_node * np.arange(n_tasks))
+        tot_tasks = N * eval(parameters['octaves']).shape[0] * eval(
+            parameters['scales']).shape[0] * eval(parameters['thresholds']).shape[0]
+
+        init_seeds = initial_seed + (N_per_node * np.arange(tot_tasks))
 
         for i in range(n_tasks):
             self.generate_samples_creator(
