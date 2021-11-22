@@ -389,7 +389,7 @@ class Generator:
         # Creating number of samples for each node
         N_per_node = tmp * np.ones(n_tasks, dtype=int)
         # If number of tasks does not split evenly among nodes
-        if N - tmp != 0:
+        if N - tmp * n_tasks != 0:
             difference = N - int(tmp * n_tasks)
             flag = True
             while flag:
@@ -404,8 +404,13 @@ class Generator:
         N_params = eval(parameters['octaves']).shape[0] * eval(
             parameters['scales']).shape[0] * eval(parameters['thresholds']).shape[0]
 
-        init_seeds = initial_seed + \
-            (N_per_node * N_params * np.arange(n_tasks))
+        init_seeds = [0]
+        for i in range(1, n_tasks):
+            init_seeds.append(
+                init_seeds[i - 1] + tot_tasks * N_per_node[i - 1])
+        init_seeds = np.array(init_seeds)
+        # init_seeds = initial_seed + \
+        #     (N_per_node * N_params * np.arange(n_tasks))
 
         for i in range(n_tasks):
             self.generate_samples_creator(
