@@ -61,6 +61,8 @@ class Generator:
         self.path_potential = Path(paths['potential'])
         self.path_lmp = Path(paths['lammps'])
         self.path_cnn = Path(paths['cnn'])
+        self.path_initial_features = paths['features']
+        self.path_initial_targets = paths['targets']
         self.generation = 0
         self.criterion = criterion
         self.optimizer_args = optimizer_args
@@ -74,7 +76,7 @@ class Generator:
 
         return
 
-    def initiate(self, path, path_features, path_targets):
+    def initiate(self, path):
         """Initiates the project with starting folder and dataset.
 
         :param path: Path to store project
@@ -111,8 +113,10 @@ class Generator:
         (path / 'gen0' / 'simulations' / 'weakest').mkdir(parents=True)
         (path / 'gen0' / 'simulations' / 'strongest').mkdir()
 
-        shutil.copy(path_features, path / 'gen0' / 'data' / 'features.npy')
-        shutil.copy(path_targets, path / 'gen0' / 'data' / 'targets.npy')
+        shutil.copy(self.path_initial_features, path /
+                    'gen0' / 'data' / 'features.npy')
+        shutil.copy(self.path_initial_targets, path /
+                    'gen0' / 'data' / 'targets.npy')
 
         # Set current working directory. Updated as we increase the number of generations
         self.proj_direc = path
@@ -540,9 +544,8 @@ wait
                                 'python preds.py',
                                 self.gen_direc / 'ml' / 'predictions' / 'job.sh',)
 
-        output = subprocess.check_output(
-            ["sbatch", "job.sh"],
-            stderr=subprocess.PIPE)
+        output = subprocess.check_output(['sbatch', 'job.sh'],
+                                         stderr=subprocess.PIPE)
 
         print(f'Gen. {self.generation}: predictions on samples complete')
 
@@ -743,7 +746,7 @@ wait
             f.write(
                 f'np.save(Path("{path}") / "simulations" / "{subpath}" / "yield_stress", yield_stress)')
 
-    def get_measured_strenght(self):
+    def get_measured_strength(self):
         """Collects the strength measured by MD simulations of the 100 strongest
         and 100 weakest predicted samples.
         """
@@ -769,13 +772,13 @@ wait
                                 exec_cmd='python collect_data.py',
                                 path=self.gen_direc / 'simulations' / 'strongest' / 'job.sh')
         os.chdir(self.gen_direc / 'simulations' / 'weakest')
-        subprocess.Popen(
-            ['sbatch', 'job.sh']).wait()
+        output = subprocess.check_output(['sbatch', 'job.sh'],
+                                         stderr=subprocess.PIPE)
         tmp1 = np.load('yield_stress.npy')
 
         os.chdir(self.gen_direc / 'simulations' / 'strongest')
-        subprocess.Popen(
-            ['sbatch', 'job.sh']).wait()
+        output = subprocess.check_output(['sbatch', 'job.sh'],
+                                         stderr=subprocess.PIPE)
         tmp2 = np.load('yield_stress.npy')
 
         print(f'Gen. {self.generation}: yield for new samples stored to files')
