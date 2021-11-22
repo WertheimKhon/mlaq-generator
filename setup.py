@@ -23,6 +23,8 @@ setuptools.setup(
                       'lammps_simulator @ git+https://git@github.com/evenmn/lammps-simulator@master#egg=lammps_simulator',
                       'run_torch_model @ git+https://git@github.com/chdre/run-torch-model@master#egg=run_torch_model',
                       'simplexgrid @ git+https://git@github.com/chdre/simplexgrid@master#egg=simplexgrid',
-                      'data_analyzer @ git+https://git@github.com/chdre/data-analyzer@master#egg=data_analyzer'],
+                      'data_analyzer @ git+https://git@github.com/chdre/data-analyzer@master#egg=data_analyzer',
+                      'molecular_builder'],
     include_package_data=True,
+
 )

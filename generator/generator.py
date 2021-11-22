@@ -13,7 +13,6 @@ import shutil
 import torch
 import sys
 from cnn import Model
-import pandas as pd
 import pickle
 
 
@@ -290,16 +289,11 @@ class Generator:
                                 exec_cmd=f'python3 run_cnn.py',
                                 path=self.gen_direc / 'ml' / 'training' / 'job.sh')
 
-        output = subprocess.check_output(["sbatch", "job.sh"],
+        output = subprocess.check_output(['sbatch', 'job.sh'],
                                          stderr=subprocess.PIPE)
 
         print(f'Training complete for gen. {self.generation}')
         os.chdir(self.proj_direc)
-
-        # for line in sshProcess.stdout:
-        #     if line == "END\n":
-        #         break
-        #     print(line, end="")
 
         return
 
