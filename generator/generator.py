@@ -723,7 +723,7 @@ wait
         with open(path / 'simulations' / subpath / 'collect_data.py', 'w') as f:
             f.write('import numpy as np\n')
             f.write('from lammps_logfile_reader import readLog\n')
-            f.write('from pathlib import Path')
+            f.write('from pathlib import Path\n')
             f.write('from data_analyzer import dataset\n\n')
 
             f.write(f'low = {low}\n')
