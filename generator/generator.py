@@ -742,7 +742,7 @@ wait
             f.write(
                 f'  pyy = -np.array(logdict.get("Pyy"), dtype=float)[low:] / 1e4\n')
             f.write(f'  dset = Dataset(np.zeros(pyy.shape), pyy)\n')
-            f.write(f'  dset.prep_data_mlaq(window=1001)\n')
+            f.write(f'  dset.prep_data_mlaq(window=101)\n')
             f.write(f'  yield_stress[i] = dset.get_ymax()\n\n')
 
             f.write(
