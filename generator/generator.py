@@ -18,7 +18,33 @@ import pickle
 
 
 class Generator:
-    """
+    """Class which performs a "search algorithm". In short we
+        1) train a NN on a dataset
+        2) use the trained model to perform predictions on unseen data
+        3) select some samples based on the predictions
+        4) measure the true values
+        5) add the new data points to the full dataset
+        6) 1-5 for a given number of generations
+    Points 1-5 is called a generation. The goal is to iteratively create a
+    model which learns a specific task (i.e. locating samples which maximizes
+    the target value, or class).
+
+    At the present time the module is specific for molecular dynamics using
+    LAMMPS and CNN.
+
+    :param paths: Paths for potential, lammps and cnn files
+    :type paths: dict
+    :param criterion: Loss function for CNN. Defaults to None which leads to
+                      torch.nn.MSELoss()
+    :type criterion: str
+    :param optimizer_args: Arguments for the chosen optimizer. Defaults to None,
+                           which leads to lr 0.001, wd 0.01.
+    :type optimizer_args: dict
+    :param optimizer: Optimizer for CNN. Defaults to None, which leads to
+                      torch.optim.Adam
+    :type optimizer: str
+    :param epochs: Number of iterations for training CNN
+    :type epochs: int
     """
 
     def __init__(self, paths, criterion=None, optimizer_args=None,
@@ -52,8 +78,12 @@ class Generator:
     def initiate(self, path, path_features, path_targets):
         """Initiates the project with starting folder and dataset.
 
-        :param path:
-        :type path:
+        :param path: Path to store project
+        :type path: pathlib.PosixPath or str
+        :param path_features: Path of features
+        :type path_features: pathlib.PosixPath or str
+        :param path_targets: Path of targets
+        :type path_targets: pathlib.PosixPath or str
         """
         assert self.generation == 0, \
             'Cannot initiate project if it has already started'
@@ -90,9 +120,6 @@ class Generator:
         self.gen_direc = path / 'gen0'
 
         self.data_collect_job_id = None
-
-    # @staticmethod
-    # def gather_data():
 
     def next_generation(self):
         """Sets up for the next generation.
@@ -171,6 +198,18 @@ class Generator:
     @staticmethod
     def generate_trainer(path, optimizer, criterion, optimizer_args, epochs):
         """Generates a python script for training CNN
+
+        :param criterion: Loss function for CNN. Defaults to None which leads to
+                          torch.nn.MSELoss()
+        :type criterion: str
+        :param optimizer_args: Arguments for the chosen optimizer. Defaults to None,
+                               which leads to lr 0.001, wd 0.01.
+        :type optimizer_args: dict
+        :param optimizer: Optimizer for CNN. Defaults to None, which leads to
+                          torch.optim.Adam
+        :type optimizer: str
+        :param epochs: Number of iterations for training CNN
+        :type epochs: int
         """
 
         if optimizer is None:
@@ -198,7 +237,7 @@ class Generator:
             f.write(f'criterion = {criterion} \n')
             f.write(f'optimizer_args = {optimizer_args} \n\n')
             f.write('torch.backends.cudnn.benchmark = True \n\n')
-            f.write('dataloader_train, dataloader_test=create_dataloader(features=features, targets=targets, batch_size=128, train_size=0.8, test_size=0.2, shuffle=True) \n\n')
+            f.write('dataloader_train, dataloader_test = create_dataloader(features=features, targets=targets, batch_size=128, train_size=0.8, test_size=0.2, shuffle=True) \n\n')
             f.write(
                 f'train_cnn = RunTorchCNN(model, epochs={epochs}, optimizer=optimizer, optimizer_args=optimizer_args, dataloaders=(dataloader_train, dataloader_test), criterion=criterion, verbose=False, seed=42) \n\n')
             f.write('train_cnn() \n\n')
@@ -214,6 +253,15 @@ class Generator:
         """Trains a CNN on data which has been measured by MD simulations of
         material structures. Queues a CNN to start when all MD simulations are
         completed.
+
+        :param file: Name of file containing CNN. Defaults to run_cnn.py.
+        :type file: str
+        :param jobscript: Name of jobscript. Defaults to job.sh.
+        :type jobscript: str
+        :param method: Which method to use for jobscript. Defaults to slurm_gpu,
+                       meaning the training will be done on a GPU using slurm
+                       queue.
+        :type method: str
 
         TO-DO:
             1) Set stdout and stderr subprocess to something else
@@ -258,6 +306,16 @@ class Generator:
     @staticmethod
     def generate_samples_creator(path, parameters, initial_seed, N, iter):
         """Creates python file which executes the creation of new samples
+
+        :param parameters: Parameters for Simplex noise.
+        :type params: dict
+        :param initial_seed: Initial seed for Simplex noise.
+        :type initial_seed: int
+        :param N: Number of samples for each set of params.
+        :type N: int
+        :param iter: Iteration of Simplex algorithm. Typically tells which
+                     process created the noise.
+        :type iter: int
         """
 
         with open(path / 'data' / 'samples' / f'new_samples{iter}.py', 'w') as f:
@@ -309,10 +367,24 @@ class Generator:
                            jobname='new_samples', **kwargs):
         """Create new samples to perform predictions on.
 
-        ssh to egil
-        sbatch cpu job
-            - pass **parameters to simplexgrid
-            - creates new samples
+        :param initial_seed: Initial seed for Simplex noise.
+        :type initial_seed: int
+        :param parameters: Parameters for Simplex noise.
+        :type params: dict
+        :param n_tasks: Number of tasks for Slurm queue.
+        :type n_tasks: int
+        :param n_nodes: Number of nodes for Slurm queue.
+        :type n_nodes: int
+        :param N: Number of samples for each set of params.
+        :type N: int
+        :param tasks_per_node: Tasks per node for Slurm queue.
+        :type tasks_per_node: int
+        :param method: Which method to use for jobscript. Defaults to slurm_cpu,
+                       meaning the training will be done on a CPU using slurm
+                       queue.
+        :type method: str
+        :param jobname: Name of job. Defaults to new_samples.
+        :type jobname: str
 
         TO-DO:
             - Rewrite while flag part of code to make it as vectorized as
@@ -383,6 +455,8 @@ wait
     def gather_new_samples(path):
         """Collects samples created by multiple instances of SimplexGrid.
 
+        :param path: Path of new samples.
+        :type path: Pathlib.PosixPath
         """
         files = path.glob('samples_*')
         dicts = []
@@ -404,6 +478,22 @@ wait
     def create_preds_new_samples(ml_path, samples_path, epochs, optimizer,
                                  criterion, optimizer_args):
         """Creates a python script that performs
+
+        :param ml_path: Path to ml directory.
+        :type ml_path: pathlib.PosixPath or str
+        :param samples_path: Path to samples.
+        :type samples_path: pathlib.PosixPath or str
+        :param epochs: Number of training iterations.
+        :type epochs: int
+        :param criterion: Loss function for CNN. Defaults to None which leads to
+                          torch.nn.MSELoss()
+        :type criterion: str
+        :param optimizer_args: Arguments for the chosen optimizer. Defaults to None,
+                               which leads to lr 0.001, wd 0.01.
+        :type optimizer_args: dict
+        :param optimizer: Optimizer for CNN. Defaults to None, which leads to
+                          torch.optim.Adam
+        :type optimizer: str
         """
 
         if optimizer is None:
@@ -474,6 +564,21 @@ wait
     @staticmethod
     def check_porosity_samples(image, N_atoms, atoms, normal=(0, 1, 0)):
         """Check the actual porosity for the chosen samples.
+
+        :param image: Image for CNN.
+        :type image. ndarray
+        :param N_atoms: Number of atoms before removing particles.
+        :type N_atoms: int
+        :param atoms: Object containing atom information.
+        :type atoms: ASE.atoms
+        :param normal: Normal vector to space where particles are removed.
+                       Defaults to (0, 1, 0), i.e. removing particles in x-z
+                       plane along y axis.
+        :type normal: array_like
+        :returns porosity: Porosity
+        :rtype porosity: float
+        :returns atoms_copy: Carved atomic system.
+        :rtype atoms_copy: ASE.atoms
         """
         atoms_copy = atoms.copy()
         geometry = ImageToSurfaceGeometry(normal=normal, image=image)
@@ -556,6 +661,17 @@ wait
         return
 
     def execute_lammps_files(self, lmp_args, slurm_args, var, N=100):
+        """Executes the LAMMPS files chosen above.
+
+        :param lmp_args: Lammps arguments.
+        :type lmp_args: dict
+        :slurm_args: Slurm arguments.
+        :type slurm_args: dict
+        :param var: Variables for Lammps script.
+        :type var: dict
+        :param N: Number of simulations.
+        :type N: int
+        """
         job_ids_w = np.zeros(N, dtype=int)
 
         for i in range(N):
@@ -602,6 +718,15 @@ wait
     def create_collect_data(path, subpath='weakest',
                             low=int(np.ceil(30 / 0.0005) / 10)):
         """Path has to be path to generation folder
+
+        :param path: Project path.
+        :type path: str
+        :param subpath: "Path" of subsamples. Defaults to weakest.
+        :type subpath: str
+        :param low: Initial index of lammps logfile. Typically the index after
+                    equilibriation. Defaults to int(np.ceil(30 / 0.0005) / 10)),
+                    30 ps runtime, dt 0.0005 and a print interval of 10.
+        :type low: int
         """
         with open(path / 'simulations' / 'collect_data.py', 'w') as f:
             f.write('import numpy as np\n')
