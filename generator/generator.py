@@ -479,7 +479,7 @@ wait
 
     @staticmethod
     def create_preds_new_samples(ml_path, samples_path, epochs, optimizer,
-                                 criterion, optimizer_args):
+                                 criterion, optimizer_args, N=32):
         """Creates a python script that performs
 
         :param ml_path: Path to ml directory.
@@ -497,6 +497,9 @@ wait
         :param optimizer: Optimizer for CNN. Defaults to None, which leads to
                           torch.optim.Adam
         :type optimizer: str
+        :param N: Number of files to read. Defaults to 32 (16 threads on two
+                  nodes).
+        :type N: int
         """
 
         if optimizer is None:
@@ -514,25 +517,17 @@ wait
             f.write('from cnn import Model\n')
             f.write('import numpy as np\n\n')
 
-            f.write(
-                f'with open("{samples_path}/all_samples", "rb") as f:\n')
-            f.write('   features = np.array(pickle.load(f)["grid"])\n')
-
-            f.write(f'batch_size = 100000\n')
-            f.write(f'N = features.shape[0]\n')
             f.write('model = Model()\n')
             f.write(
                 f'run_model = RunTorchCNN(model=model, epochs={epochs}, optimizer="{optimizer}", optimizer_args={optimizer_args}, dataloaders=None, criterion={criterion})\n')
             f.write(f'run_model.load_model("{ml_path}/training/model.pt")\n')
             f.write('predictions = []\n\n')
 
-            f.write(f'for i in range(N // batch_size):\n')
-            f.write(f'  if i == N // batch_size - 1:\n')
+            f.write(f'for i in range({N}):\n')
+            f.write(f'  with open("{samples_path}/samples_{i}", "rb") as f:\n')
+            f.write('       features = np.array(pickle.load(f)["grid"])\n')
             f.write(
-                f'      tensor = torch.Tensor(features[i * batch_size:, np.newaxis, :, :])\n')
-            f.write(f'  else:\n')
-            f.write(
-                f'      tensor = torch.Tensor(features[i * batch_size:(i + 1) * batch_size, np.newaxis, :, :])\n\n')
+                f'  tensor = torch.Tensor(features[i * batch_size:, np.newaxis, :, :])\n')
             f.write(f'  p = run_model.predict(tensor)\n')
             f.write(f'  p = predictions.detach().cpu().numpy()\n')
             f.write(f'  predictions.append(p)\n\n')
@@ -541,24 +536,30 @@ wait
             f.write(
                 f'np.save("{ml_path}/predictions/predictions", predictions)\n')
 
-    def prediction_new_samples(self):
+    def prediction_new_samples(self, N=32):
         """Performs predictions on new samples. Runs on GPU
+
+        :param N: Number of files to read. Defaults to 32 (16 threads on two
+                  nodes).
+        :type N: int
         """
         os.chdir(self.gen_direc / 'ml' / 'predictions')
 
         shutil.copy(self.path_cnn, self.gen_direc / 'ml' / 'predictions')
 
-        self.gather_new_samples(self.gen_direc / 'data' / 'samples')
+        # self.gather_new_samples(self.gen_direc / 'data' / 'samples')
 
         self.create_preds_new_samples(self.gen_direc / 'ml',
                                       self.gen_direc / 'data' / 'samples',
                                       epochs=self.epochs,
                                       optimizer=self.optimizer,
                                       criterion=self.criterion,
-                                      optimizer_args=self.optimizer_args)
+                                      optimizer_args=self.optimizer_args,
+                                      N=N)
 
         args = self.slurm_gpu()
         args['wait'] = None
+        args['job-name'] = 'preds'
         self.generate_jobscript(args,
                                 'python3 preds.py',
                                 self.gen_direc / 'ml' / 'predictions' / 'job.sh',)
