@@ -239,7 +239,7 @@ class Generator:
             f.write(f'criterion = {criterion} \n')
             f.write(f'optimizer_args = {optimizer_args} \n\n')
             f.write('torch.backends.cudnn.benchmark = True \n\n')
-            f.write('dataloader_train, dataloader_test = create_dataloader(features=features, targets=targets, batch_size=128, train_size=0.8, test_size=0.2, shuffle=True) \n\n')
+            f.write('dataloader_train, dataloader_test = create_dataloader(features=features, targets=targets, batch_size=128, train_size=0.8, test_size=0.2, shuffle=True, pin_memory=True) \n\n')
             f.write(
                 f'train_cnn = RunTorchCNN(model, epochs={epochs}, optimizer=optimizer, optimizer_args=optimizer_args, dataloaders=(dataloader_train, dataloader_test), criterion=criterion, verbose=False, seed=42) \n\n')
             f.write('train_cnn() \n\n')
