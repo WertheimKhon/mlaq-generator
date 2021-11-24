@@ -70,13 +70,13 @@ class Generator:
         self.epochs = epochs
 
         # Initiate a dataset
-        x = np.load(Path(paths['features']))
-        y = np.load(Path(paths['targets']))
+        x = np.load(Path(paths['features'])).astype(np.int8)
+        y = np.load(Path(paths['targets'])).astype(np.int8)
         self.dataset = Dataset(x, y)
 
         return
 
-    def initiate(self, path):
+    def initiate(self, path, jump_in_later_gen=False):
         """Initiates the project with starting folder and dataset.
 
         :param path: Path to store project
@@ -119,6 +119,34 @@ class Generator:
         self.gen_direc = path / 'gen0'
 
         self.data_collect_job_id = None
+
+    def initial_later_gen(self, path, gen, path_last_dataset):
+        """
+
+        :param path: Path to existing project
+        :type path: str
+        :param gen: Number of generation
+        :type gen: int
+        :param path_last_dataset: Path to the last made dataset.
+        :type path: str
+        """
+        self.generation = gen
+        self.gen_direc = path / f'gen{self.generation}'
+        self.data_collect_job_id = None
+
+        (path / f'gen{self.generation}' /
+         'ml' / 'training').mkdir(parents=True)
+        (path / f'gen{self.generation}' / 'ml' / 'predictions').mkdir()
+        (path / f'gen{self.generation}' /
+         'data' / 'samples').mkdir(parents=True)
+        (path / f'gen{self.generation}' /
+         'simulations' / 'weakest').mkdir(parents=True)
+        (path / f'gen{self.generation}' / 'simulations' / 'strongest').mkdir()
+
+        shutil.copy(path_last_dataset, path /
+                    f'gen{self.generation}' / 'data' / 'features.npy')
+        shutil.copy(path_last_dataset, path /
+                    f'gen{self.generation}' / 'data' / 'targets.npy')
 
     def next_generation(self):
         """Sets up for the next generation.
@@ -320,10 +348,11 @@ class Generator:
 
             f.write('np.random.seed(42)\n\n')
 
-            f.write(f'octaves = {parameters["octaves"]}\n')
-            f.write(f'scales = {parameters["scales"]}\n')
-            f.write(f'thresholds = {parameters["thresholds"]}\n')
-            f.write(f'bases = {parameters["bases"]}\n')
+            f.write(f'octaves = {parameters["octaves"]}.astype(np.int8)\n')
+            f.write(f'scales = {parameters["scales"]}.astype(np.int8)\n')
+            f.write(
+                f'thresholds = {parameters["thresholds"]}.astype(np.float16)\n')
+            f.write(f'bases = {parameters["bases"]}.astype(int)\n')
             f.write(f'l1 = {parameters["l1"]}\n')
             f.write(f'l2 = {parameters["l2"]}\n')
             f.write(f'n1 = {parameters["n1"]}\n')
@@ -349,6 +378,10 @@ class Generator:
             f.write(
                 'simpgrid = CreateMultipleSimplexGrids(scales, thresholds, bases, octaves, l1, l2, n1, n2, N, seedgen, criterion=criterion)\n')
             f.write('dictionary = simpgrid()\n\n')
+
+            f.write(
+                f'print("Finished samples for iteration {iter}", flush=True)\n\n')
+
             f.write(
                 f'with open("{path}/data/samples/samples_{iter}", "wb") as f:\n')
             f.write(
@@ -428,7 +461,7 @@ class Generator:
         args['wait'] = None
 
         command = f"""for i in $(seq 0 {n_tasks - 1}); do
-    srun --exclusive --ntasks=1 --nodes=1 python3 new_samples$i.py &
+    srun --exclusive --ntasks=1 --nodes=1 --mem=2gb --output=slurm.out$i python3 new_samples$i.py &
 done
 wait
         """
@@ -474,7 +507,11 @@ wait
         for d in dicts:
             for key, val in d.items():
                 dictionary[key].extend(d[key])
-        with open(path / 'all_samples', 'wb') as f:
+        with open(path / 'all_samples_grids', 'wb') as f:
+            pickle.dump(dictionary['grid'], f,
+                        protocol=pickle.HIGHEST_PROTOCOL)
+        del dictionary['grid']
+        with open(path / 'all_samples_parameters', 'wb') as f:
             pickle.dump(dictionary, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     @staticmethod
@@ -524,13 +561,19 @@ wait
             f.write('predictions = []\n\n')
 
             f.write(f'for i in range({N}):\n')
-            f.write(f'  with open("{samples_path}/samples_{i}", "rb") as f:\n')
-            f.write('       features = np.array(pickle.load(f)["grid"])\n')
             f.write(
-                f'  tensor = torch.Tensor(features[i * batch_size:, np.newaxis, :, :])\n')
-            f.write(f'  p = run_model.predict(tensor)\n')
-            f.write(f'  p = predictions.detach().cpu().numpy()\n')
-            f.write(f'  predictions.append(p)\n\n')
+                f'  with open(f"{samples_path}/samples_" + str(i), "rb") as f:\n')
+            f.write('       features = np.array(pickle.load(f)["grid"])\n')
+            f.write(f'  n = features.shape[0]\n')
+            f.write(f'  r = np.arange(0, n, 5000)\n')
+            f.write(f'  r = np.concatenate((r, -np.ones(1)), axis=0).astype(int)\n\n')
+            f.write(f'  for i in range(r.shape[0] - 1):\n')
+            f.write(
+                f'      tensor = torch.Tensor(features[r[i]:r[i + 1], np.newaxis, :, :])\n')
+            f.write(f'      p = run_model.predict(tensor)\n')
+            f.write(
+                f'      p = p.detach().cpu().numpy().astype(np.float32)\n')
+            f.write(f'      predictions.append(p)\n\n')
 
             f.write(f'predictions = np.concatenate(predictions, axis=0)\n\n')
             f.write(
@@ -547,7 +590,7 @@ wait
 
         shutil.copy(self.path_cnn, self.gen_direc / 'ml' / 'predictions')
 
-        # self.gather_new_samples(self.gen_direc / 'data' / 'samples')
+        self.gather_new_samples(self.gen_direc / 'data' / 'samples')
 
         self.create_preds_new_samples(self.gen_direc / 'ml',
                                       self.gen_direc / 'data' / 'samples',
@@ -569,8 +612,8 @@ wait
 
         print(f'Gen. {self.generation}: predictions on samples complete')
 
-        with open(self.gen_direc / 'data' / 'samples' / 'all_samples', 'rb') as f:
-            self.features_new = np.array(pickle.load(f)["grid"])
+        with open(self.gen_direc / 'data' / 'samples' / 'all_samples_parameters', 'rb') as f:
+            self.features_params_new = pickle.load(f)
 
         self.predictions = np.load(
             self.gen_direc / 'ml' / 'predictions' / 'predictions.npy')[:, 0]
@@ -627,18 +670,32 @@ wait
         inds_weakest = []
 
         N_atoms = len(atoms_cutspace)
+        lx, _, lz = atoms.cell.cellpar()[:3]
 
         i = 0
         idx = 0
+
+        noise_grid_weakest = np.zeros((N, 200, 100), dtype=np.int8)
         while len(inds_weakest) < N:
             ind = inds_sorted[i]
-            p, atoms_carved = self.check_porosity_samples(
-                self.features_new[ind], N_atoms, atoms_cutspace)
+            simpgrid = SimplexGrid(scale=self.features_params_new['scale'][ind],
+                                   threshold=self.features_params_new['threshold'][ind],
+                                   l1=lx,
+                                   l2=lz,
+                                   n1=200,
+                                   n2=100)
+            noise_grid = simpgrid(seed=self.features_params_new['seed'][ind],
+                                  base=self.features_params_new['base'][ind])
+
+            p, atoms_carved = self.check_porosity_samples(noise_grid,
+                                                          N_atoms,
+                                                          atoms_cutspace)
             if p < 0.5 and p > 0.1:
                 inds_weakest.append(ind)
                 new_atoms = atoms_carved + atoms
                 new_atoms.write(self.gen_direc / 'simulations' / 'weakest' /
                                 f'weakest_{idx}.data', format='lammps-data')
+                noise_grid_weakest[idx] = noise_grid
                 idx += 1
             i += 1
             if ind == inds_sorted[-1]:
@@ -647,16 +704,27 @@ wait
 
         i = -1
         idx = 0
+        noise_grid_strongest = np.zeros((N, 200, 100), dtype=np.int8)
         while len(inds_strongest) < N:
             ind = inds_sorted[i]
-            p, atoms_carved = self.check_porosity_samples(
-                self.features_new[ind], N_atoms, atoms_cutspace)
+            simpgrid = SimplexGrid(scale=self.features_params_new['scale'][ind],
+                                   threshold=self.features_params_new['threshold'][ind],
+                                   l1=lx,
+                                   l2=lz,
+                                   n1=200,
+                                   n2=100)
+            noise_grid = simpgrid(seed=self.features_params_new['seed'][ind],
+                                  base=self.features_params_new['base'][ind])
+            p, atoms_carved = self.check_porosity_samples(noise_grid,
+                                                          N_atoms,
+                                                          atoms_cutspace)
 
             if p < 0.5 and p > 0.1:
                 inds_strongest.append(ind)
                 new_atoms = atoms_carved + atoms
                 new_atoms.write(self.gen_direc / 'simulations' / 'strongest' /
                                 f'strongest_{idx}.data', format='lammps-data')
+                noise_grid_strongest[idx] = noise_grid
                 idx += 1
             i -= 1
             if ind == inds_sorted[0]:
@@ -666,11 +734,13 @@ wait
         assert not np.any(np.in1d(inds_strongest, inds_weakest)), \
             "Same geometry present in both strongest and weakest"
 
-        self.features_new_weakest = self.features_new[inds_weakest]
-        self.features_new_strongest = self.features_new[inds_strongest]
-
         self.dataset.extend_data(features=np.concatenate(
-            (self.features_new_weakest, self.features_new_strongest), axis=0))
+            (noise_grid_weakest, noise_grid_strongest), axis=0))
+
+        np.save(self.gen_direc / 'data' / 'samples' /
+                'inds_weakest', inds_weakest)
+        np.save(self.gen_direc / 'data' / 'samples' /
+                'inds_strongest', inds_strongest)
 
         print(f'Gen. {self.generation}: samples chosen')
 
