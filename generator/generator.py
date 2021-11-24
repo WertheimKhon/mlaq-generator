@@ -86,67 +86,39 @@ class Generator:
             'Cannot initiate project if it has already started'
         if isinstance(path, str):
             path = Path(path)
+        if not jump_in_later_gen:  # WIP
+            # Create directories needed for generation 0
+            try:
+                path.mkdir()
+            except:
+                i = 1
+                while i < 101:
+                    try:
+                        p = Path(str(path) + f'{i}')
+                        p.mkdir()
+                        path = p
+                        break
+                    except:
+                        i += 1
+                if i == 100:
+                    raise ValueError(f'{path} is not a valid path')
 
-        # Create directories needed for generation 0
-        try:
-            path.mkdir()
-        except:
-            i = 1
-            while i < 101:
-                try:
-                    p = Path(str(path) + f'{i}')
-                    p.mkdir()
-                    path = p
-                    break
-                except:
-                    i += 1
-            if i == 100:
-                raise ValueError(f'{path} is not a valid path')
-
-        (path / 'gen0' / 'ml' / 'training').mkdir(parents=True)
-        (path / 'gen0' / 'ml' / 'predictions').mkdir()
-        (path / 'gen0' / 'data' / 'samples').mkdir(parents=True)
-        (path / 'gen0' / 'simulations' / 'weakest').mkdir(parents=True)
-        (path / 'gen0' / 'simulations' / 'strongest').mkdir()
+            (path / 'gen0' / 'ml' / 'training').mkdir(parents=True)
+            (path / 'gen0' / 'ml' / 'predictions').mkdir()
+            (path / 'gen0' / 'data' / 'samples').mkdir(parents=True)
+            (path / 'gen0' / 'simulations' / 'weakest').mkdir(parents=True)
+            (path / 'gen0' / 'simulations' / 'strongest').mkdir()
 
         shutil.copy(self.path_initial_features, path /
-                    'gen0' / 'data' / 'features.npy')
+                    f'gen{self.generation}' / 'data' / 'features.npy')
         shutil.copy(self.path_initial_targets, path /
-                    'gen0' / 'data' / 'targets.npy')
+                    f'gen{self.generation}' / 'data' / 'targets.npy')
 
         # Set current working directory. Updated as we increase the number of generations
         self.proj_direc = path
         self.gen_direc = path / 'gen0'
 
         self.data_collect_job_id = None
-
-    def initial_later_gen(self, path, gen, path_last_dataset):
-        """
-
-        :param path: Path to existing project
-        :type path: str
-        :param gen: Number of generation
-        :type gen: int
-        :param path_last_dataset: Path to the last made dataset.
-        :type path: str
-        """
-        self.generation = gen
-        self.gen_direc = path / f'gen{self.generation}'
-        self.data_collect_job_id = None
-
-        (path / f'gen{self.generation}' /
-         'ml' / 'training').mkdir(parents=True)
-        (path / f'gen{self.generation}' / 'ml' / 'predictions').mkdir()
-        (path / f'gen{self.generation}' /
-         'data' / 'samples').mkdir(parents=True)
-        (path / f'gen{self.generation}' /
-         'simulations' / 'weakest').mkdir(parents=True)
-        (path / f'gen{self.generation}' / 'simulations' / 'strongest').mkdir()
-
-        shutil.copy(path_last_dataset, path /
-                    f'gen{self.generation}' / 'data' / 'features.npy')
-        shutil.copy(path_last_dataset, path /
-                    f'gen{self.generation}' / 'data' / 'targets.npy')
 
     def next_generation(self):
         """Sets up for the next generation.
