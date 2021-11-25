@@ -5,7 +5,7 @@ with open('README.md', 'r') as infile:
 
 setuptools.setup(
     name='generator',
-    version='0.1.0',
+    version='0.1.1',
     author='Christer Dreierstad',
     author_email='christerdr@outlook.com',
     description='Generative algorithm for an MD project using CNN to predict strength of materials',
