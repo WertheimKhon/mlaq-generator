@@ -460,14 +460,20 @@ wait
         #     print(line, end="")
 
     @ staticmethod
-    def gather_new_samples(path):
+    def gather_new_samples(path, N):
         """Collects samples created by multiple instances of SimplexGrid.
 
         :param path: Path of new samples.
         :type path: Pathlib.PosixPath
+        :param N: Number of tasks, i.e. number of files where samples are
+                  distributed.
+        :type N: int
         """
-        files = path.glob('samples_*')
+        cwd = Path.cwd()
+        os.chdir(path)
+        files = [f'samples_{i}' for i in range(N)]
         dicts = []
+
         for file in files:
             with open(file, 'rb') as f:
                 d = pickle.load(f)
@@ -485,6 +491,8 @@ wait
         del dictionary['grid']
         with open(path / 'all_samples_parameters', 'wb') as f:
             pickle.dump(dictionary, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        os.chdir(cwd)
 
     @staticmethod
     def create_preds_new_samples(ml_path, samples_path, epochs, optimizer,
@@ -562,7 +570,7 @@ wait
 
         shutil.copy(self.path_cnn, self.gen_direc / 'ml' / 'predictions')
 
-        self.gather_new_samples(self.gen_direc / 'data' / 'samples')
+        self.gather_new_samples(self.gen_direc / 'data' / 'samples', N)
 
         self.create_preds_new_samples(self.gen_direc / 'ml',
                                       self.gen_direc / 'data' / 'samples',
