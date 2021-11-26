@@ -654,7 +654,7 @@ wait
 
         i = 0
         idx = 0
-
+        porosity = []
         noise_grid_weakest = np.zeros((N, 200, 100), dtype=np.int8)
         while len(inds_weakest) < N:
             ind = inds_sorted[i]
@@ -676,6 +676,7 @@ wait
                 new_atoms.write(self.gen_direc / 'simulations' / 'weakest' /
                                 f'weakest_{idx}.data', format='lammps-data')
                 noise_grid_weakest[idx] = noise_grid
+                porosity.append(p)
                 idx += 1
             i += 1
             if ind == inds_sorted[-1]:
@@ -705,6 +706,7 @@ wait
                 new_atoms.write(self.gen_direc / 'simulations' / 'strongest' /
                                 f'strongest_{idx}.data', format='lammps-data')
                 noise_grid_strongest[idx] = noise_grid
+                porosity.append(p)
                 idx += 1
             i -= 1
             if ind == inds_sorted[0]:
@@ -721,6 +723,8 @@ wait
                 'inds_weakest', inds_weakest)
         np.save(self.gen_direc / 'data' / 'samples' /
                 'inds_strongest', inds_strongest)
+        np.save(self.gen_direc / 'data' / 'samples' /
+                'porosity', np.asarray(porosity))
 
         print(f'Gen. {self.generation}: samples chosen')
 
