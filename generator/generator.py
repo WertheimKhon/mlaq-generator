@@ -538,6 +538,9 @@ wait
             f.write(
                 f'run_model = RunTorchCNN(model=model, epochs={epochs}, optimizer="{optimizer}", optimizer_args={optimizer_args}, dataloaders=None, criterion={criterion})\n')
             f.write(f'run_model.load_model("{ml_path}/training/model.pt")\n')
+            f.write(
+                f'device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")\n')
+            f.write(f'model.to(device)\n')
             f.write('predictions = []\n\n')
 
             f.write(f'for i in range({N}):\n')
@@ -546,10 +549,11 @@ wait
             f.write('       features = np.array(pickle.load(f)["grid"])\n')
             f.write(f'  n = features.shape[0]\n')
             f.write(f'  r = np.arange(0, n, 5000)\n')
-            f.write(f'  r = np.concatenate((r, -np.ones(1)), axis=0).astype(int)\n\n')
+            f.write(
+                f'  r = np.concatenate((r, np.array([n])), axis=0).astype(int)\n\n')
             f.write(f'  for i in range(r.shape[0] - 1):\n')
             f.write(
-                f'      tensor = torch.Tensor(features[r[i]:r[i + 1], np.newaxis, :, :])\n')
+                f'      tensor = torch.Tensor(features[r[i]:r[i + 1], np.newaxis, :, :]).to(device)\n')
             f.write(f'      p = run_model.predict(tensor)\n')
             f.write(
                 f'      p = p.detach().cpu().numpy().astype(np.float32)\n')
