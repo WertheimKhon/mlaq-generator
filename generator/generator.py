@@ -120,6 +120,34 @@ class Generator:
 
         self.data_collect_job_id = None
 
+    def initial_later_gen(self, path, gen, path_last_dataset):
+        """
+
+        :param path: Path to existing project
+        :type path: str
+        :param gen: Number of generation
+        :type gen: int
+        :param path_last_dataset: Path to the last made dataset.
+        :type path: str
+        """
+        self.generation = gen
+        self.gen_direc = path / f'gen{self.generation}'
+        self.data_collect_job_id = None
+
+        (path / f'gen{self.generation}' /
+         'ml' / 'training').mkdir(parents=True)
+        (path / f'gen{self.generation}' / 'ml' / 'predictions').mkdir()
+        (path / f'gen{self.generation}' /
+         'data' / 'samples').mkdir(parents=True)
+        (path / f'gen{self.generation}' /
+         'simulations' / 'weakest').mkdir(parents=True)
+        (path / f'gen{self.generation}' / 'simulations' / 'strongest').mkdir()
+
+        shutil.copy(path_last_dataset, path /
+                    f'gen{self.generation}' / 'data' / 'features.npy')
+        shutil.copy(path_last_dataset, path /
+                    f'gen{self.generation}' / 'data' / 'targets.npy')
+
     def next_generation(self):
         """Sets up for the next generation.
         """
@@ -152,7 +180,7 @@ class Generator:
             f.write('#!/bin/bash\n')
             for key, val in arguments.items():
                 if val is None:
-                    f.write(f'#SBATCH --{key}')
+                    f.write(f'#SBATCH --{key}\n')
                 else:
                     f.write(f'#SBATCH --{key}={val}\n')
             f.write('\n\n')
