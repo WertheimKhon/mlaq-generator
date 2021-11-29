@@ -5,11 +5,15 @@ For the time being this program is far from generalized, and is considered to be
 
 # Requirements
 - torch
-- lammps_simulator (https://github.com/evenmn/lammps-simulator)
-- run_torch_model (https://github.com/chdre/run-torch-model)
+- torchmetrics
+- scikit-learn 
+- lammps-logfile-reader (https://github.com/chdre/lammps-logfile-reader)
+- noise-randomized (https://github.com/chdre/noise_randomized - forked version from https://github.com/caseman/noise and https://github.com/jamescamdenmartin/noise)
+- lammps-simulator (https://github.com/evenmn/lammps-simulator)
+- run-torch-model (https://github.com/chdre/run-torch-model)
 - simplexgrid (https://github.com/chdre/simplexgrid)
-- molecular_builder (https://github.com/chdre/molecular-builder - forked version from https://github.com/henriasv/molecular-builder which includes an extra function)
-- data_analyzer (https://github.com/chdre/data-analyzer)
+- molecular-builder (https://github.com/chdre/molecular-builder - forked version from https://github.com/henriasv/molecular-builder which includes an extra function)
+- data-analyzer (https://github.com/chdre/data-analyzer)
 
 # Install 
 Install using pip:
