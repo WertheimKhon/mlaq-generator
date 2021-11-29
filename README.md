@@ -8,7 +8,7 @@ For the time being this program is far from generalized, and is considered to be
 - lammps_simulator (https://github.com/evenmn/lammps-simulator)
 - run_torch_model (https://github.com/chdre/run-torch-model)
 - simplexgrid (https://github.com/chdre/simplexgrid)
-- molecular_builder (https://github.com/chdre/molecular-builder - forked version which includes an extra function)
+- molecular_builder (https://github.com/chdre/molecular-builder - forked version from https://github.com/henriasv/molecular-builder which includes an extra function)
 - data_analyzer (https://github.com/chdre/data-analyzer)
 
 # Install 
