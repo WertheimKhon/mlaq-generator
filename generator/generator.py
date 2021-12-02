@@ -4,7 +4,7 @@ from lammps_simulator import Simulator
 from lammps_simulator.computer import SlurmGPU, SlurmCPU
 from run_torch_model import create_dataloader, RunTorchCNN
 from simplexgrid import SimplexGrid, SeedGenerator
-from molecular_builder.geometry import ImageToSurfaceGeometry
+from molecular_builder.geometry import ProceduralSurfaceGridGeometry
 from molecular_builder.core import carve_geometry
 from pathlib import Path
 from data_analyzer import Dataset
