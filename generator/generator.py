@@ -33,26 +33,20 @@ class Generator:
 
     :param paths: Paths for potential, lammps and cnn files
     :type paths: dict
-    :param criterion: Loss function for CNN. Defaults to None which leads to
-                      torch.nn.MSELoss()
-    :type criterion: str
-    :param optimizer_args: Arguments for the chosen optimizer. Defaults to None,
-                           which leads to lr 0.001, wd 0.01.
-    :type optimizer_args: dict
-    :param optimizer: Optimizer for CNN. Defaults to None, which leads to
-                      torch.optim.Adam
-    :type optimizer: str
-    :param epochs: Number of iterations for training CNN
-    :type epochs: int
+    :param config: Configuration for NN. Must include optimizer and
+                   parameters for optimizer, loss function and number of epochs.
+                   Optimizer and loss function must be provided as strings, e.g.
+                   'torch.optim.Adam' or 'torch.nn.MSELoss()'. Optimizer args
+                   must be a dictionary, e.g. {'lr': 1e-4}. Epochs must be an
+                   integer value.
+    :type config: dict
     """
 
-    def __init__(self, paths, criterion=None, optimizer_args=None,
-                 optimizer=None, epochs=2500):
-
-        if not isinstance(criterion, str) and criterion is not None:
+    def __init__(self, paths, config):
+        if not isinstance(config['criterion'], str) and config['criterion'] is not None:
             raise ValueError(
                 'criterion must be of type str specifying which loss functions to use')
-        if not isinstance(optimizer, str) and optimizer is not None:
+        if not isinstance(config['optimizer'], str) and config['optimizer'] is not None:
             raise ValueError(
                 'optimizer must be of type str specifying which optimizer to use')
 
@@ -63,11 +57,7 @@ class Generator:
         self.path_cnn = Path(paths['cnn'])
         self.path_initial_features = paths['features']
         self.path_initial_targets = paths['targets']
-        self.generation = 0
-        self.criterion = criterion
-        self.optimizer_args = optimizer_args
-        self.optimizer = optimizer
-        self.epochs = epochs
+        self.config = config
 
         # Initiate a dataset
         x = np.load(Path(paths['features'])).astype(np.int8)
@@ -165,7 +155,7 @@ class Generator:
         print(f'===============================================================')
         print(f'Next generation: {self.generation}')
 
-    @ staticmethod
+    @staticmethod
     def generate_jobscript(arguments, exec_cmd, path):
         """Generates a jobscript with givens arguments.
 
@@ -186,7 +176,7 @@ class Generator:
             f.write('\n\n')
             f.write(exec_cmd)
 
-    @ staticmethod
+    @staticmethod
     def slurm_gpu(N=1, **kwargs):
         """Generates arguments for Slurm GPU jobscript.
 
@@ -204,7 +194,7 @@ class Generator:
 
         return args
 
-    @ staticmethod
+    @staticmethod
     def slurm_cpu(n_tasks, n_nodes, tasks_per_node, **kwargs):
         """Generates arguments for Slurm CPU jobscript.
 
@@ -225,30 +215,78 @@ class Generator:
 
         return args
 
-    @ staticmethod
-    def generate_trainer(path, optimizer, criterion, optimizer_args, epochs):
-        """Generates a python script for training CNN
+    @staticmethod
+    def generate_shell_script(n_tasks, exec_cmd, path):
+        """Generates a shell script for running on a local machine.
 
-        :param criterion: Loss function for CNN. Defaults to None which leads to
-                          torch.nn.MSELoss()
-        :type criterion: str
-        :param optimizer_args: Arguments for the chosen optimizer. Defaults to None,
-                               which leads to lr 0.001, wd 0.01.
-        :type optimizer_args: dict
-        :param optimizer: Optimizer for CNN. Defaults to None, which leads to
-                          torch.optim.Adam
-        :type optimizer: str
-        :param epochs: Number of iterations for training CNN
-        :type epochs: int
+        :param n_tasks: Number of tasks.
+        :type n_tasks: int
+        :param exec_cmd: Command to execute script
+        :type exec_cmd: str
+        :param path: Path to save the jobscript
+        :type path: pathlib.PosixPath
+        """
+        with open(path, 'w') as f:
+            f.write('#!/bin/bash\n\n')
+
+            if if n_tasks > 1:
+                f.write(f'for i in seq(0..{n_tasks}); do\n\n')
+                f.write(f'  {exec_cmd} $i &\n')
+                f.write(f'done\n')
+                f.write(f'wait\n')
+            else:
+                f.write(f'{exec_cmd}')
+
+    @staticmethod
+    def cpu(n_tasks, **kwargs):
+        """Generates arguments for shell script.
+
+        :param n_tasks: Number of tasks per CPU core
+        :type n_tasks: int
+
+        WIP:
+            At the current moment not needed, can simply raise
+            generate_shell_script.
         """
 
-        if optimizer is None:
+        raise NotImplementedError(
+            'At the current moment not needed, can simply raise generate_shell_script.')
+
+        args = {'n_tasks': n_tasks}
+
+        return args
+
+    @staticmethod
+    def generate_trainer(path, config):
+        """Generates a python script for training CNN
+
+        :param path: Path to folder for generation.
+        :type path: str or pathlib.PosixPath
+        :param config: Configuration for NN. Must include optimizer and
+                       parameters for optimizer, loss function and number of
+                       epochs. Optimizer and loss function must be provided as
+                       strings, e.g. 'torch.optim.Adam' or 'torch.nn.MSELoss()'.
+                       Optimizer args must be a dictionary, e.g. {'lr': 1e-4}.
+                       Epochs can be an integer value.
+        :type config: dict
+        """
+        try:
+            optimizer = config['optimizer']
+        except:
             optimizer = 'torch.optim.Adam'
-        if criterion is None:
+        try:
+            criterion = config['criterion']
+        except:
             criterion = 'torch.nn.MSELoss()'
-        if optimizer_args is None:
+        try:
+            optimizer_args = config['optimizer_args']
+        except:
             optimizer_args = {'lr': 1e-4,
                               'weight_decay': 0.01}
+        try:
+            epochs = config['epochs']
+        except:
+            epochs = 2500
 
         with open(path / 'ml' / 'training' / 'run_cnn.py', 'w') as f:
             f.write('import torch \n')
@@ -275,6 +313,23 @@ class Generator:
                 f'train_cnn.save_model("{path / "ml" / "training" / "model.pt"}") \n')
             f.write(
                 f'train_cnn.save_running_metrics("{path / "ml" / "training"}") \n')
+
+    def mv_files(paths):
+        """Move files to default file location ".../gen#/files". Typical files
+        are Python scripts for neural network and a file for executing the
+        the network, gathering data files etc.
+
+        :param paths: Paths to files. Must contain paths to:
+                        1) Pytorch NN
+                        2) Python script to execute NN
+                        3) File which gathers data, must take paths as an input
+                        through sys.argv[1]
+        :type paths: list
+        """
+
+        for path in paths:
+            path = Path(path)
+            shutil.copy(path, self.gen_direc / 'files' / path.name)
 
     def train_cnn(self, file='run_cnn.py',
                   jobscript='job.sh',
@@ -305,8 +360,11 @@ class Generator:
         args['job-name'] = 'cnn'
 
         # Generate script to run pytorch NN
-        self.generate_trainer(self.gen_direc, self.optimizer,
-                              self.criterion, self.optimizer_args, self.epochs)
+        self.generate_trainer(self.gen_direc,
+                              self.config['optimizer'],
+                              self.config['criterion'],
+                              self.config['optimizer_args'],
+                              self.config['epochs'])
 
         if self.data_collect_job_id is not None:
             args['dependency'] = f'afterok:{self.data_collect_job_id}'
@@ -606,10 +664,10 @@ wait
 
         self.create_preds_new_samples(self.gen_direc / 'ml',
                                       self.gen_direc / 'data' / 'samples',
-                                      epochs=self.epochs,
-                                      optimizer=self.optimizer,
-                                      criterion=self.criterion,
-                                      optimizer_args=self.optimizer_args,
+                                      epochs=self.config['epochs'],
+                                      optimizer=self.config['optimizer'],
+                                      criterion=self.config['criterion'],
+                                      optimizer_args=self.config['optimizer_args'],
                                       N=N)
 
         args = self.slurm_gpu()
@@ -633,7 +691,7 @@ wait
         os.chdir(self.proj_direc)
 
     @staticmethod
-    def check_porosity_samples(image, N_atoms, atoms, normal=(0, 1, 0)):
+    def check_porosity_samples(params, ind, N_atoms, atoms, normal=(0, 1, 0), grid=(200, 100)):
         """Check the actual porosity for the chosen samples.
 
         :param image: Image for CNN.
@@ -652,7 +710,17 @@ wait
         :rtype atoms_copy: ASE.atoms
         """
         atoms_copy = atoms.copy()
-        geometry = ImageToSurfaceGeometry(normal=normal, image=image)
+        # geometry = ImageToSurfaceGeometry(normal=normal, image=image)
+        geometry = ProceduralSurfaceGridGeometry(
+            normal=normal,
+            scale=params['scale'][ind],
+            threshold=params['threshold'][ind],
+            seed=params['seed'][ind],
+            grid=grid,
+            octaves=params['octave'][ind],
+            base=params['base'][ind],
+            period=4096
+        )
         num_carved = carve_geometry(atoms_copy, geometry, side="out")
         porosity = num_carved / N_atoms
 
@@ -690,16 +758,17 @@ wait
         noise_grid_weakest = np.zeros((N, 200, 100), dtype=np.int8)
         while len(inds_weakest) < N:
             ind = inds_sorted[i]
-            simpgrid = SimplexGrid(scale=self.features_params_new['scale'][ind],
-                                   threshold=self.features_params_new['threshold'][ind],
-                                   l1=lx,
-                                   l2=lz,
-                                   n1=200,
-                                   n2=100)
-            noise_grid = simpgrid(seed=self.features_params_new['seed'][ind],
-                                  base=self.features_params_new['base'][ind])
+            # simpgrid = SimplexGrid(scale=self.features_params_new['scale'][ind],
+            #                        threshold=self.features_params_new['threshold'][ind],
+            #                        l1=lx,
+            #                        l2=lz,
+            #                        n1=200,
+            #                        n2=100)
+            # noise_grid = simpgrid(seed=self.features_params_new['seed'][ind],
+            #                       base=self.features_params_new['base'][ind])
 
-            p, atoms_carved = self.check_porosity_samples(noise_grid,
+            p, atoms_carved = self.check_porosity_samples(self.features_params_new,
+                                                          ind,
                                                           N_atoms,
                                                           atoms_cutspace)
             if p < 0.5 and p > 0.1:
@@ -720,15 +789,19 @@ wait
         noise_grid_strongest = np.zeros((N, 200, 100), dtype=np.int8)
         while len(inds_strongest) < N:
             ind = inds_sorted[i]
-            simpgrid = SimplexGrid(scale=self.features_params_new['scale'][ind],
-                                   threshold=self.features_params_new['threshold'][ind],
-                                   l1=lx,
-                                   l2=lz,
-                                   n1=200,
-                                   n2=100)
-            noise_grid = simpgrid(seed=self.features_params_new['seed'][ind],
-                                  base=self.features_params_new['base'][ind])
-            p, atoms_carved = self.check_porosity_samples(noise_grid,
+            # geometry = ProceduralSurfaceGridGeometry(
+            #     normal=(0, 1, 0),
+            #     scale=self.features_params_new['scale'][ind],
+            #     threshold=self.features_params_new['threshold'][ind],
+            #     seed=self.features_params_new['seed'][ind],
+            #     grid=(200, 100),
+            #     octaves=self.features_params_new['octave'][ind],
+            #     base=self.features_params_new['base'][ind],
+            #     period=4096
+            # )
+
+            p, atoms_carved = self.check_porosity_samples(self.features_params_new,
+                                                          ind,
                                                           N_atoms,
                                                           atoms_cutspace)
 
