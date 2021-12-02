@@ -408,7 +408,7 @@ class Generator:
             f.write(f'scales = {parameters["scales"]}.astype(np.int8)\n')
             f.write(
                 f'thresholds = {parameters["thresholds"]}.astype(np.float16)\n')
-            f.write(f'bases = {parameters["bases"]}.astype(int)\n')
+            f.write(f'bases = {parameters["bases"]}.astype(float)\n')
             f.write(f'l1 = {parameters["l1"]}\n')
             f.write(f'l2 = {parameters["l2"]}\n')
             f.write(f'n1 = {parameters["n1"]}\n')
@@ -716,7 +716,7 @@ wait
             seed=int(params['seed'][ind]),
             grid=grid,
             octaves=int(params['octave'][ind]),
-            base=int(params['base'][ind]),
+            base=params['base'][ind],
             period=4096
         )
         num_carved = carve_geometry(atoms_copy, geometry, side="out")
