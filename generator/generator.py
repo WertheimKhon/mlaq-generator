@@ -229,7 +229,7 @@ class Generator:
         with open(path, 'w') as f:
             f.write('#!/bin/bash\n\n')
 
-            if if n_tasks > 1:
+            if n_tasks > 1:
                 f.write(f'for i in seq(0..{n_tasks}); do\n\n')
                 f.write(f'  {exec_cmd} $i &\n')
                 f.write(f'done\n')
