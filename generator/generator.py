@@ -711,12 +711,12 @@ wait
         # geometry = ImageToSurfaceGeometry(normal=normal, image=image)
         geometry = ProceduralSurfaceGridGeometry(
             normal=normal,
-            scale=params['scale'][ind],
+            scale=int(params['scale'][ind]),
             threshold=params['threshold'][ind],
-            seed=params['seed'][ind],
+            seed=int(params['seed'][ind]),
             grid=grid,
-            octaves=params['octave'][ind],
-            base=params['base'][ind],
+            octaves=int(params['octave'][ind]),
+            base=int(params['base'][ind]),
             period=4096
         )
         num_carved = carve_geometry(atoms_copy, geometry, side="out")
