@@ -769,7 +769,7 @@ wait
                                                           ind,
                                                           N_atoms,
                                                           atoms_cutspace)
-            if p < 0.5 and p > 0.1:
+            if p <= 0.5 and p >= 0.1:
                 inds_weakest.append(ind)
                 new_atoms = atoms_carved + atoms
                 new_atoms.write(self.gen_direc / 'simulations' / 'weakest' /
