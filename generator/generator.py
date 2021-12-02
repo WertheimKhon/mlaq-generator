@@ -720,9 +720,10 @@ wait
             period=4096
         )
         num_carved = carve_geometry(atoms_copy, geometry, side="out")
+        noise_grid = geometry.noise_grid
         porosity = num_carved / N_atoms
 
-        return porosity, atoms_copy
+        return porosity, atoms_copy, noise_grid
 
     def choose_samples(self, atoms_cutspace, atoms, N=100):  # , criterions):
         """Choose samples by the N strongest and N weakest. The porosity
@@ -765,10 +766,12 @@ wait
             # noise_grid = simpgrid(seed=self.features_params_new['seed'][ind],
             #                       base=self.features_params_new['base'][ind])
 
-            p, atoms_carved = self.check_porosity_samples(self.features_params_new,
-                                                          ind,
-                                                          N_atoms,
-                                                          atoms_cutspace)
+            p, atoms_carved, noise_grid = self.check_porosity_samples(
+                self.features_params_new,
+                ind,
+                N_atoms,
+                atoms_cutspace
+            )
             if p <= 0.5 and p >= 0.1:
                 inds_weakest.append(ind)
                 new_atoms = atoms_carved + atoms
@@ -798,10 +801,12 @@ wait
             #     period=4096
             # )
 
-            p, atoms_carved = self.check_porosity_samples(self.features_params_new,
-                                                          ind,
-                                                          N_atoms,
-                                                          atoms_cutspace)
+            p, atoms_carved, noise_grid = self.check_porosity_samples(
+                self.features_params_new,
+                ind,
+                N_atoms,
+                atoms_cutspace
+            )
 
             if p < 0.5 and p > 0.1:
                 inds_strongest.append(ind)
