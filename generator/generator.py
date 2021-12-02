@@ -98,6 +98,7 @@ class Generator:
             (path / 'gen0' / 'data' / 'samples').mkdir(parents=True)
             (path / 'gen0' / 'simulations' / 'weakest').mkdir(parents=True)
             (path / 'gen0' / 'simulations' / 'strongest').mkdir()
+            (path / 'gen0' / 'files').mkdir()
 
         shutil.copy(self.path_initial_features, path /
                     f'gen{self.generation}' / 'data' / 'features.npy')
@@ -361,10 +362,7 @@ class Generator:
 
         # Generate script to run pytorch NN
         self.generate_trainer(self.gen_direc,
-                              self.config['optimizer'],
-                              self.config['criterion'],
-                              self.config['optimizer_args'],
-                              self.config['epochs'])
+                              self.config)
 
         if self.data_collect_job_id is not None:
             args['dependency'] = f'afterok:{self.data_collect_job_id}'
